@@ -93,3 +93,61 @@ def test_script_is_read_only():
         "Add-Content",
     ):
         assert verb not in POWERSHELL_SCRIPT
+
+
+# -- command execution (subprocess mocked: no Windows needed) ------------------------------
+
+
+class _Completed:
+    def __init__(self, returncode=0, stdout=b"", stderr=b""):
+        self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
+
+
+def test_list_devices_runs_the_encoded_script_and_parses_output(monkeypatch):
+    import base64
+
+    from usbtether.probe import windows
+
+    seen = {}
+
+    def fake_run(command, **kwargs):
+        seen["command"], seen["kwargs"] = command, kwargs
+        return _Completed(stdout=b"\xef\xbb\xbf" + SINGLE.encode("utf-8"))  # with a UTF-8 BOM
+
+    monkeypatch.setattr(windows.subprocess, "run", fake_run)
+    (device,) = windows.WindowsProbe().list_devices()
+    assert device.serial == "4C530001230101117333"
+
+    command = seen["command"]
+    assert command[0] == "powershell.exe"
+    assert "-NoProfile" in command and "-NonInteractive" in command
+    assert "-Command" not in command  # the script is never passed as a shell string
+    decoded = base64.b64decode(command[command.index("-EncodedCommand") + 1]).decode("utf-16-le")
+    assert decoded == POWERSHELL_SCRIPT
+    assert seen["kwargs"]["timeout"] == 30.0
+
+
+def test_nonzero_exit_is_a_probe_error(monkeypatch):
+    from usbtether.probe import windows
+
+    monkeypatch.setattr(
+        windows.subprocess, "run", lambda *a, **k: _Completed(1, b"", b"Access is denied")
+    )
+    with pytest.raises(ProbeError, match="Access is denied"):
+        windows.WindowsProbe().list_devices()
+
+
+@pytest.mark.parametrize("failure", [OSError("powershell.exe not found"), TimeoutError()])
+def test_launch_failures_are_probe_errors(monkeypatch, failure):
+    import subprocess
+
+    from usbtether.probe import windows
+
+    def boom(*a, **k):
+        if isinstance(failure, TimeoutError):
+            raise subprocess.TimeoutExpired("powershell.exe", 30)
+        raise failure
+
+    monkeypatch.setattr(windows.subprocess, "run", boom)
+    with pytest.raises(ProbeError):
+        windows.WindowsProbe().list_devices()
