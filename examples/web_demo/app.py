@@ -2,6 +2,8 @@
 
 A small FastAPI app that exercises the library end to end:
 
+* **USB Authentication**: enroll the drive and verify it from the page (what the CLI's
+  ``enroll`` and ``verify`` do), so the other two experiments have something to work with.
 * **Software Guard**: a 12-step workflow. Every step needs a fresh challenge-response with
   the enrolled USB drive and yields a single-use, scoped, 8-second capability. Unplugging the
   drive revokes the session.
@@ -37,7 +39,9 @@ from pydantic import BaseModel
 
 from usbtether.agent import Agent
 from usbtether.authz import Authorizer, Capability
+from usbtether.enrollment import enroll
 from usbtether.errors import (
+    AlreadyEnrolledError,
     AuthorizationError,
     TokenLockedError,
     UnsupportedDeviceError,
@@ -62,6 +66,16 @@ FATAL_REASONS = {
     "token_mismatch",
     "device_unsupported",
 }
+
+
+class EnrollRequest(BaseModel):
+    mount: str
+    remember: bool = True
+    force: bool = False
+
+
+class VerifyRequest(BaseModel):
+    mount: str | None = None
 
 
 class GuardStart(BaseModel):
@@ -176,6 +190,50 @@ def create_app(
                 }
                 for s in list(authorizer._sessions.values())[-5:]
             ],
+        }
+
+    # -- USB Authentication --------------------------------------------------------------
+
+    @app.post("/api/usb/enroll")
+    def usb_enroll(req: EnrollRequest) -> dict[str, Any]:
+        try:
+            result = enroll(
+                probe,
+                registry,
+                req.mount,
+                remember=req.remember,
+                secret_store=secret_store,
+                overwrite=req.force,
+            )
+        except UsbTetherError as exc:
+            return {
+                "ok": False,
+                "message": str(exc),
+                "already": isinstance(exc, AlreadyEnrolledError),
+            }
+        return {
+            "ok": True,
+            "token_id": result.token.token_id,
+            "device": f"{result.device.vendor_id}:{result.device.product_id}",
+            "protection": result.protection,
+            "revoked": list(result.revoked),
+            "message": "Enrolled. A challenge-response self-test passed.",
+        }
+
+    @app.post("/api/usb/verify")
+    def usb_verify(req: VerifyRequest) -> dict[str, Any]:
+        try:
+            result = verifier.authenticate(agent, "web-verify", req.mount)
+        except UsbTetherError as exc:
+            return {"ok": False, "message": _explain(exc)[0]}
+        if not result.ok:
+            reason = result.reason.value if result.reason else "failed"
+            return {"ok": False, "message": f"{reason}: {result.detail or 'verification failed'}"}
+        return {
+            "ok": True,
+            "token_id": result.token_id,
+            "warnings": list(result.warnings),
+            "message": "Challenge-response accepted. This is the drive that was enrolled.",
         }
 
     # -- Software Guard ------------------------------------------------------------------

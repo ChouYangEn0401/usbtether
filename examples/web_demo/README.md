@@ -16,6 +16,9 @@ Open <http://127.0.0.1:8000>. If the drive's key is passphrase-protected, set
 
 ## What to try
 
+**USB Authentication**: pick your drive, press *Enroll*, then *Verify now*. This is the CLI's
+`enroll` and `verify` in the browser; do it first.
+
 **Software Guard**: start the 12-step workflow. Each step performs a fresh challenge-response
 and consumes a single-use capability scoped to that step (`demo-workflow` /
 `execute_step:<n>`, 8 s). Unplug the drive mid-run: the presence monitor revokes the session

@@ -6,6 +6,15 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- Web demo: a **USB Authentication** tab to enroll and verify the drive from the page (CLI
+  `enroll`/`verify` equivalents), shown before the Software Guard and Vault experiments.
+
+### Fixed
+- Windows probe took ~40 s and hit its 30 s timeout on machines with several internal disks.
+  It now stops walking the PnP tree at the PCI root and skips SATA/NVMe disks (about 2 s),
+  and the default timeout is 60 s.
+
 ## [0.2.0]
 
 ### Added

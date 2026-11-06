@@ -167,3 +167,22 @@ def test_demo_explains_how_to_fix_a_locked_key(demo, probe, registry):
     result = client.post("/api/guard/start", json={"total_steps": 2}).json()
     assert result["started"] is False
     assert "--remember" in result["reason"] and "USBTETHER_PASSPHRASE" in result["reason"]
+
+
+def test_enroll_and_verify_from_the_page(demo):
+    client, _, mount = demo
+    assert client.post("/api/usb/verify", json={}).json()["ok"] is False  # nothing enrolled yet
+    enrolled = client.post("/api/usb/enroll", json={"mount": str(mount)}).json()
+    assert enrolled["ok"], enrolled
+    assert enrolled["protection"] == "host-secret"
+    assert client.post("/api/usb/verify", json={"mount": str(mount)}).json()["ok"] is True
+    assert client.get("/api/status").json()["ready"]
+
+
+def test_enroll_twice_needs_force(demo):
+    client, _, mount = demo
+    assert client.post("/api/usb/enroll", json={"mount": str(mount)}).json()["ok"]
+    again = client.post("/api/usb/enroll", json={"mount": str(mount)}).json()
+    assert again["ok"] is False and again["already"] is True
+    forced = client.post("/api/usb/enroll", json={"mount": str(mount), "force": True}).json()
+    assert forced["ok"] and len(forced["revoked"]) == 1

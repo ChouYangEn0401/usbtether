@@ -27,11 +27,29 @@ input{background:#080f1c;color:var(--text);border:1px solid var(--line);border-r
   <button onclick="refreshUsb()">&#8635; Refresh</button>
 </div>
 <div class="tabs">
-  <button class="tab active" data-tab="guard">01 &middot; Software Guard</button>
+  <button class="tab active" data-tab="auth">00 &middot; USB Authentication</button>
+  <button class="tab" data-tab="guard">01 &middot; Software Guard</button>
   <button class="tab" data-tab="vault">02 &middot; Vault Unlock Lab</button>
 </div>
 
-<section id="guard" class="panel">
+<section id="auth" class="panel">
+  <h2>USB Authentication</h2><p class="desc">Do what the CLI does, from the page: enroll your drive, then verify it with a live challenge-response. Do this first; the two experiments need an enrolled drive.</p>
+  <div class="sub" style="margin-bottom:8px">STEP 1 &middot; PICK A DRIVE</div>
+  <div id="driveList" class="sub">Looking for USB drives&hellip; (the first scan can take several seconds)</div>
+  <div class="row" style="margin:14px 0">
+    <label class="sub"><input type="checkbox" id="optRemember" checked style="width:auto"> Protect the key with a secret kept on this computer (<code>--remember</code>)</label>
+    <label class="sub"><input type="checkbox" id="optForce" style="width:auto"> Re-enroll if already enrolled (<code>--force</code>)</label>
+  </div>
+  <div class="row">
+    <button class="primary" id="enrollBtn" onclick="enrollDrive()">&#9998; Enroll this drive</button>
+    <button id="verifyBtn" onclick="verifyDrive()">&#10003; Verify now</button>
+  </div>
+  <div class="vault locked" id="authBox"><div class="lockicon" id="authIcon">&#9635;</div><h2 id="authTitle">NOT VERIFIED</h2><p class="sub" id="authText">Enroll a drive, then verify it.</p></div>
+  <div class="sub" style="margin-top:14px">EVENT TRACE</div><div class="log" id="authLog">[SYSTEM] Plug in a USB drive, pick it above, and enroll.</div>
+  <div class="note">Verification asks the drive's token to sign a fresh random challenge and checks the signature and the drive's hardware identity. Unplug the drive and verify again to see it fail.</div>
+</section>
+
+<section id="guard" class="panel hidden">
   <h2>Software Guard</h2><p class="desc">A workflow where every step needs a fresh challenge-response with the enrolled drive and yields a single-use, step-scoped, 8-second capability. Unplug the drive mid-run to watch the session get revoked.</p>
   <div class="row">
     <button class="primary" id="startBtn" onclick="startGuard()">&#9654; Start workflow</button>
@@ -62,23 +80,65 @@ input{background:#080f1c;color:var(--text);border:1px solid var(--line);border-r
 </section>
 </main>
 <script>
-let guardTimer=null, guardSession=null, guardStep=0, guardTotal=12, vaultChallenge=null;
+let selMount=null, statusBusy=false, guardTimer=null, guardSession=null, guardStep=0, guardTotal=12, vaultChallenge=null;
 const $=id=>document.getElementById(id);
 function log(id,msg,cls=''){const el=$(id);const s=document.createElement('span');s.className=cls;s.textContent=`[${new Date().toLocaleTimeString()}] ${msg}\n`;el.appendChild(s);el.scrollTop=el.scrollHeight;}
 async function api(path,data){const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data||{})});const j=await r.json();if(!r.ok)throw new Error(j.detail||'Request failed');return j;}
 async function refreshUsb(){
+  if(statusBusy)return;statusBusy=true;
   try{
     const r=await fetch('/api/status').then(x=>x.json());
+    renderDrives(r);
     const el=$('usbStatus');el.textContent='';
     const span=document.createElement('span');
-    if(r.probe_error){span.className='bad';span.textContent='\u25cf '+r.probe_error;}
-    else if(r.ready){span.className='good';span.textContent='\u25cf Enrolled drive detected';}
-    else if(r.devices.length){span.className='warn';span.textContent='\u25cf USB drive found, but none is enrolled ('+r.devices.map(d=>d.id+(d.bindable?'':' no usable serial')).join(', ')+')';}
-    else{span.className='bad';span.textContent='\u25cf No USB drive detected';}
+    if(r.probe_error){span.className='bad';span.textContent='● '+r.probe_error;}
+    else if(r.ready){span.className='good';span.textContent='● Enrolled drive detected';}
+    else if(r.devices.length){span.className='warn';span.textContent='● USB drive found, but none is enrolled — use the USB Authentication tab';}
+    else{span.className='bad';span.textContent='● No USB drive detected';}
     el.appendChild(span);
     const live=r.sessions.filter(s=>s.active).length, dead=r.sessions.find(s=>!s.active&&s.reason);
-    $('gSession').textContent=guardSession?(live?'active':(dead?'revoked: '+dead.reason:'inactive')):'\u2014';
+    $('gSession').textContent=guardSession?(live?'active':(dead?'revoked: '+dead.reason:'inactive')):'—';
   }catch(e){$('usbStatus').textContent='Status unavailable';}
+  finally{statusBusy=false;}
+}
+function renderDrives(r){
+  const box=$('driveList');box.textContent='';
+  if(r.probe_error){box.textContent=r.probe_error;return;}
+  if(!r.devices.length){box.textContent='No USB drive detected. Plug one in.';selMount=null;return;}
+  const mounts=r.devices.flatMap(d=>d.mounts.filter(Boolean));
+  if(!mounts.includes(selMount))selMount=mounts[0]||null;
+  r.devices.forEach(d=>{
+    d.mounts.filter(Boolean).forEach(m=>{
+      const lab=document.createElement('label');lab.style.cssText='display:block;padding:8px 0;cursor:pointer';
+      const rb=document.createElement('input');rb.type='radio';rb.name='drive';rb.style.cssText='width:auto;margin-right:8px';rb.checked=(m===selMount);rb.onchange=()=>{selMount=m;};
+      lab.appendChild(rb);
+      lab.appendChild(document.createTextNode(m+'  '+(d.product||d.id)+'  '));
+      const tag=document.createElement('span');
+      tag.className=d.enrolled?'good':(d.bindable?'warn':'bad');
+      tag.textContent=d.enrolled?'[enrolled]':(d.bindable?'[not enrolled]':'[unusable: no hardware serial]');
+      lab.appendChild(tag);box.appendChild(lab);
+    });
+  });
+}
+function setAuth(ok,title,text){$('authBox').className='vault '+(ok?'unlocked':'locked');$('authIcon').textContent=ok?'▣ ✓':'▣';$('authTitle').textContent=title;$('authText').textContent=text;}
+async function enrollDrive(){
+  if(!selMount){log('authLog','Pick a drive first.','warn');return;}
+  $('enrollBtn').disabled=true;log('authLog','Enrolling '+selMount+'…','cyan');
+  try{
+    const r=await api('/api/usb/enroll',{mount:selMount,remember:$('optRemember').checked,force:$('optForce').checked});
+    if(r.ok){log('authLog',r.message+' token '+r.token_id+' ('+r.protection+')','good');r.revoked.forEach(t=>log('authLog','Revoked old token '+t,'warn'));setAuth(true,'ENROLLED','Drive '+r.device+' is bound to this computer.');}
+    else{log('authLog',r.message+(r.already?' Tick "Re-enroll" to replace it.':''),'bad');}
+  }catch(e){log('authLog',e.message,'bad');}
+  $('enrollBtn').disabled=false;refreshUsb();
+}
+async function verifyDrive(){
+  $('verifyBtn').disabled=true;log('authLog','Sending a fresh challenge to the drive…','cyan');
+  try{
+    const r=await api('/api/usb/verify',{mount:selMount});
+    if(r.ok){log('authLog',r.message+' token '+r.token_id,'good');(r.warnings||[]).forEach(w=>log('authLog','warning: '+w,'warn'));setAuth(true,'VERIFIED','Signature valid and hardware identity matches.');}
+    else{log('authLog','FAILED: '+r.message,'bad');setAuth(false,'VERIFICATION FAILED',r.message);}
+  }catch(e){log('authLog',e.message,'bad');}
+  $('verifyBtn').disabled=false;
 }
 document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x===b));document.querySelectorAll('section.panel').forEach(x=>x.classList.toggle('hidden',x.id!==b.dataset.tab));}));
 async function startGuard(){
@@ -112,5 +172,5 @@ async function newPuzzle(){try{const c=await api('/api/vault/new');vaultChalleng
 function setVault(ok){$('vaultBox').className='vault '+(ok?'unlocked':'locked');$('lockIcon').textContent=ok?'\u25a3 \u2713':'\u25a3';$('vaultTitle').textContent=ok?'VAULT UNLOCKED':'VAULT LOCKED';$('vaultText').textContent=ok?'Demo payload: \u201cThe secret is not the key; it is the authority to use it.\u201d':'Protected demo payload is unavailable.';}
 async function solvePuzzle(){if(!vaultChallenge){log('vaultLog','Generate a challenge first.','warn');return;}try{const r=await api('/api/vault/solve',{challenge_id:vaultChallenge,answer:Number($('answer').value)});log('vaultLog',r.message,r.unlocked?'good':'bad');if(r.unlocked){setVault(true);vaultChallenge=null;}}catch(e){log('vaultLog',e.message,'bad');}}
 async function unlockWithUsb(){if(!vaultChallenge){log('vaultLog','Generate a fresh challenge first.','warn');return;}try{const r=await api('/api/vault/usb',{challenge_id:vaultChallenge});log('vaultLog',r.message,r.unlocked?'good':'bad');if(r.unlocked){setVault(true);vaultChallenge=null;}}catch(e){log('vaultLog',e.message,'bad');}}
-refreshUsb();setInterval(refreshUsb,4000);
+refreshUsb();setInterval(refreshUsb,6000);
 </script></body></html>

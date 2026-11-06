@@ -32,18 +32,23 @@ $ErrorActionPreference = 'Stop'
 
 function Get-UsbAncestor([string]$InstanceId) {
     $current = $InstanceId
-    for ($i = 0; $i -lt 8; $i++) {
+    for ($i = 0; $i -lt 6; $i++) {
         $prop = Get-PnpDeviceProperty -InstanceId $current -KeyName 'DEVPKEY_Device_Parent' `
             -ErrorAction SilentlyContinue
         if (-not $prop -or -not $prop.Data) { return $null }
         $current = [string]$prop.Data
         if ($current -match '^USB\\VID_[0-9A-Fa-f]{4}&PID_[0-9A-Fa-f]{4}\\') { return $current }
+        # Reaching the PCI/ACPI root means this disk is not behind USB; stop (lookups are slow).
+        if ($current -match '^(PCI|ACPI|ROOT)\\') { return $null }
     }
     return $null
 }
 
 $result = @()
 foreach ($disk in @(Get-CimInstance -ClassName Win32_DiskDrive)) {
+    # SATA/IDE and NVMe disks can never be USB bridges; skipping them avoids slow PnP lookups.
+    if ($disk.InterfaceType -eq 'IDE') { continue }
+    if ($disk.PNPDeviceID -match '^SCSI\\DISK&VEN_NVME') { continue }
     $usb = Get-UsbAncestor $disk.PNPDeviceID
     if (-not $usb) { continue }
     $volumes = @()
@@ -143,7 +148,7 @@ def parse_probe_json(text: str) -> list[UsbDevice]:
 class WindowsProbe(DeviceProbe):
     """Reads attached USB drives via ``powershell.exe`` (read-only)."""
 
-    def __init__(self, timeout: float = 30.0) -> None:
+    def __init__(self, timeout: float = 60.0) -> None:
         self._timeout = timeout
 
     def list_devices(self) -> list[UsbDevice]:

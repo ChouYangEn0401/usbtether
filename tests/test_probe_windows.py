@@ -124,7 +124,7 @@ def test_list_devices_runs_the_encoded_script_and_parses_output(monkeypatch):
     assert "-Command" not in command  # the script is never passed as a shell string
     decoded = base64.b64decode(command[command.index("-EncodedCommand") + 1]).decode("utf-16-le")
     assert decoded == POWERSHELL_SCRIPT
-    assert seen["kwargs"]["timeout"] == 30.0
+    assert seen["kwargs"]["timeout"] == 60.0
 
 
 def test_nonzero_exit_is_a_probe_error(monkeypatch):
