@@ -107,7 +107,10 @@ Errors derive from `usbtether.UsbTetherError`; authorization failures are
 ## Web demo
 
 An experiment harness (not a deployable service) that exercises the whole flow in a browser:
-a 12-step guarded workflow and a vault-unlock lab. See [examples/web_demo](examples/web_demo/README.md).
+a 12-step guarded workflow, a vault-unlock lab, one-off encrypt/decrypt of real files, and
+bound folders whose files open on double-click only while the drive is plugged in
+(`usbtether register` / `usbtether open`, see [docs/usage.md §7b](docs/usage.md)).
+See [examples/web_demo](examples/web_demo/README.md).
 
 ```bash
 pip install ".[demo]"
