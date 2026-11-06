@@ -45,3 +45,7 @@ class AuthorizationError(UsbTetherError):
     def __init__(self, reason: str, message: str | None = None) -> None:
         super().__init__(message or reason)
         self.reason = reason
+
+
+class TokenLockedError(TokenError):
+    """The private key is passphrase-protected and no (or a wrong) passphrase was supplied."""
