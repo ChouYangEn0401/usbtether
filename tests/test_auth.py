@@ -4,7 +4,7 @@ import pytest
 
 from usbtether.agent import Agent
 from usbtether.device import DeviceReport
-from usbtether.enroll import enroll
+from usbtether.enrollment import enroll
 from usbtether.errors import (
     AmbiguousDeviceError,
     DeviceNotFoundError,

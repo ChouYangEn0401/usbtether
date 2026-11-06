@@ -9,7 +9,7 @@ pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
 from fastapi.testclient import TestClient
 
-from usbtether.enroll import enroll
+from usbtether.enrollment import enroll
 from usbtether.token import TOKEN_DIR
 
 from .conftest import add_stick

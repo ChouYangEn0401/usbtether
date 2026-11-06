@@ -6,7 +6,7 @@ import pytest
 
 from usbtether.agent import Agent
 from usbtether.authz import Authorizer, Capability, capability_purpose
-from usbtether.enroll import enroll
+from usbtether.enrollment import enroll
 from usbtether.errors import AuthorizationError
 from usbtether.monitor import PresenceMonitor
 from usbtether.probe.base import DeviceProbe

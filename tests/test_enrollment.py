@@ -1,6 +1,6 @@
 import pytest
 
-from usbtether.enroll import enroll
+from usbtether.enrollment import enroll
 from usbtether.errors import (
     AlreadyEnrolledError,
     DeviceNotFoundError,
@@ -75,7 +75,7 @@ def test_overwrite_revokes_the_previous_token(stick, probe, registry):
 def test_self_test_failure_rolls_everything_back(stick, probe, registry, monkeypatch):
     _, mount = stick
     monkeypatch.setattr(
-        "usbtether.enroll.Verifier.authenticate",
+        "usbtether.enrollment.Verifier.authenticate",
         lambda *a, **k: AuthResult(False, reason=FailureReason.BAD_SIGNATURE),
     )
     with pytest.raises(UsbTetherError, match="self-test"):

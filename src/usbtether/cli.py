@@ -12,7 +12,7 @@ from pathlib import Path
 from . import __version__
 from .agent import Agent
 from .device import UsbDevice
-from .enroll import enroll
+from .enrollment import enroll
 from .errors import ProbeError, UsbTetherError
 from .probe import DeviceProbe, default_probe
 from .registry import Registry
