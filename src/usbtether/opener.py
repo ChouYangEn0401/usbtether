@@ -5,7 +5,7 @@ The idea: the files you can see on disk are always encrypted. Double-clicking on
 :func:`register_association`). That command checks the drive, decrypts the file into a private
 working folder, opens it with whatever program normally handles the original name, and watches
 it: every save is encrypted straight back over the ``.utenc``. When the drive is pulled out, or
-the file has sat untouched for a while, the plain copy is deleted.
+the file has sat untouched for a while, the plain copy is deleted (once no program holds it).
 
 Honest limits: while a file is open its plain copy exists in the working folder
 (``<home>/open``), readable by anything running as you. If the helper is killed, the next run
@@ -41,7 +41,7 @@ PROG_ID = "usbtether.encfile"
 _CLASSES = r"Software\Classes"
 _STATE = ".state"
 _LOCK = ".lock"
-_ALIVE_WITHIN = 5.0
+_ALIVE_WITHIN = 10.0  # a helper touches its lock every poll
 
 
 # -- Windows file association -------------------------------------------------------------
@@ -157,7 +157,7 @@ def _slot(home: Path, source: Path) -> Path:
     return home / "open" / digest
 
 
-def _read_state(slot: Path) -> dict[str, object]:
+def _read_state(slot: Path) -> dict[str, Any]:
     try:
         data = json.loads((slot / _STATE).read_text(encoding="utf-8"))
         return data if isinstance(data, dict) else {}
@@ -169,15 +169,91 @@ def _digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _write_state(slot: Path, source: Path, synced: str) -> None:
-    (slot / _STATE).write_text(json.dumps({"src": str(source), "synced": synced}), encoding="utf-8")
+class _Link:
+    """Where a working copy belongs: the ``.utenc`` path and what was last written there.
+
+    ``cipher`` (the digest of the ``.utenc`` as we last wrote or read it) lets the file be found
+    again after its folder was renamed or moved, without trusting the name alone.
+    """
+
+    def __init__(self, slot: Path, source: Path, synced: str, cipher: str) -> None:
+        self.slot, self.source, self.synced, self.cipher = slot, source, synced, cipher
+
+    @classmethod
+    def load(cls, slot: Path) -> _Link | None:
+        s = _read_state(slot)
+        if not s.get("src"):
+            return None
+        return cls(slot, Path(str(s["src"])), str(s.get("synced", "")), str(s.get("cipher", "")))
+
+    def save(self) -> None:
+        data = {"src": str(self.source), "synced": self.synced, "cipher": self.cipher}
+        (self.slot / _STATE).write_text(json.dumps(data), encoding="utf-8")
 
 
-def _sync_back(plain: Path, source: Path, key: bytes) -> str:
-    """Encrypt ``plain`` over ``source``; returns the digest of what was synced."""
+def _walk_for(
+    anchor: Path, name: str, cipher: str, *, depth: int, budget: list[int]
+) -> Path | None:
+    top = len(anchor.parts)
+    for dirpath, dirnames, filenames in os.walk(anchor):
+        here = Path(dirpath)
+        budget[0] -= len(dirnames) + len(filenames)
+        if budget[0] <= 0:
+            return None
+        if len(here.parts) - top >= depth:
+            dirnames[:] = []
+        dirnames[:] = [d for d in dirnames if not d.startswith(("$", ".")) and d != "AppData"]
+        if name in filenames:
+            candidate = here / name
+            with contextlib.suppress(OSError):
+                if _digest(candidate) == cipher:
+                    return candidate
+    return None
+
+
+def relocate(source: Path, cipher: str, home: Path) -> Path | None:
+    """Find a ``.utenc`` whose folder was renamed or moved: same name, same encrypted bytes.
+
+    Searched: the nearest still-existing ancestor of the old location, then the bound folders.
+    """
+    if source.is_file():
+        return source
+    if not cipher:
+        return None
+    anchors: list[Path] = []
+    p = source.parent
+    while not p.is_dir() and p != p.parent:
+        p = p.parent
+    if p.is_dir():
+        anchors.append(p)
+    anchors += [f for f in BoundFolders(home).folders() if f.is_dir()]
+    budget = [200_000]
+    for anchor in anchors:
+        found = _walk_for(anchor, source.name, cipher, depth=6, budget=budget)
+        if found is not None:
+            return found
+    return None
+
+
+def _sync_back(plain: Path, link: _Link, key: bytes, home: Path) -> str:
+    """Encrypt ``plain`` back over its ``.utenc``, wherever that file is now.
+
+    Never recreates a folder that was renamed away: if the file cannot be found, the save goes
+    to ``<home>/recovered`` (still encrypted) instead. Returns a message for the log.
+    """
     digest = _digest(plain)
-    encrypt_file(plain, key, dest_dir=source.parent, keep=True)
-    return digest
+    target = relocate(link.source, link.cipher, home)
+    note = f"saved {plain.name}"
+    if target is None:
+        rescue = home / "recovered" / time.strftime("%Y%m%d-%H%M%S")
+        target = rescue / link.source.name
+        note = f"{link.source} was moved or deleted; saved to {target}"
+    elif target != link.source:
+        note = f"saved {plain.name} (now at {target.parent})"
+    written = encrypt_file(plain, key, dest_dir=target.parent, keep=True)
+    link.source, link.synced, link.cipher = written, digest, _digest(written)
+    link.save()
+    return note
 
 
 def _signature(path: Path) -> tuple[int, int] | None:
@@ -199,8 +275,24 @@ def _locked(path: Path) -> bool:
     return False
 
 
-def _wipe(slot: Path) -> None:
+def _wipe(slot: Path) -> bool:
+    """Delete a working folder. Plain files go first; if one is still held open by a program,
+    nothing else is removed (the state must survive so a later sweep can sync it). Returns
+    whether the folder is gone.
+    """
+    if not slot.exists():
+        return True
+    for p in slot.iterdir():
+        if not p.name.startswith("."):
+            try:
+                if p.is_dir():
+                    shutil.rmtree(p)
+                else:
+                    p.unlink()
+            except OSError:
+                return False
     shutil.rmtree(slot, ignore_errors=True)
+    return not slot.exists()
 
 
 def open_encrypted(
@@ -213,11 +305,15 @@ def open_encrypted(
     idle_timeout: float = 1800.0,
     poll: float = 1.0,
     on_event: Callable[[str], None] = lambda _: None,
+    on_held_open: Callable[[str], None] = lambda _: None,
 ) -> None:
     """Decrypt ``source`` to a working copy, open it, and keep it in sync until done.
 
-    ``present`` says whether the drive is still plugged in. Returns when the drive is gone or
-    the file has been idle for ``idle_timeout`` seconds; the working copy is removed by then.
+    ``present`` says whether the drive is still plugged in. When the drive goes (or the file
+    has been idle for ``idle_timeout`` seconds) the working copy is removed. If a program still
+    holds it open, ``on_held_open`` is called once and the helper keeps encrypting its saves
+    back until the program lets go, then removes it: no plain copy is left behind.
+    Renaming or moving the folder of ``source`` meanwhile is fine (see :func:`relocate`).
     """
     if not source.name.endswith(SUFFIX) or not source.is_file():
         raise UsbTetherError(f"{source} is not a {SUFFIX} file")
@@ -227,69 +323,115 @@ def open_encrypted(
     if lock.exists() and time.time() - lock.stat().st_mtime < _ALIVE_WITHIN and plain.exists():
         open_file(plain)  # another helper already owns this file: just bring it up again
         return
-    _wipe(slot)
-    slot.mkdir(parents=True)
+    if slot.exists() and not _retire(slot, key, home):
+        open_file(plain)  # leftover of a killed helper, still open in its program
+        return
+    slot.mkdir(parents=True, exist_ok=True)
     decrypt_file(source, key, dest_dir=slot, keep=True)
-    synced = _digest(plain)
-    _write_state(slot, source, synced)
+    link = _Link(slot, source, _digest(plain), _digest(source))
+    link.save()
     seen = _signature(plain)
     lock.write_text("1")
     open_file(plain)
     on_event(f"opened {plain.name}")
     last_change = time.monotonic()
+
+    def sync_if_changed() -> None:
+        nonlocal seen, last_change
+        sig = _signature(plain)
+        # a save happened and has settled (no write for half a second)
+        if sig is None or sig == seen or time.time() - sig[0] / 1e9 <= 0.5:
+            return
+        try:
+            if _digest(plain) != link.synced:
+                on_event(_sync_back(plain, link, key, home))
+            seen = sig
+            last_change = time.monotonic()
+        except OSError:
+            pass  # still being written; try again next tick
+
+    reason = "drive removed"
     try:
         while present():
             lock.touch()
-            sig = _signature(plain)
-            # a save happened and has settled (no write for half a second)
-            if sig is not None and sig != seen and time.time() - sig[0] / 1e9 > 0.5:
-                try:
-                    if _digest(plain) != synced:
-                        synced = _sync_back(plain, source, key)
-                        _write_state(slot, source, synced)
-                        on_event(f"saved {plain.name}")
-                    seen = sig
-                    last_change = time.monotonic()
-                except OSError:
-                    pass  # still being written; try again next tick
+            sync_if_changed()
             if time.monotonic() - last_change > idle_timeout and not _locked(plain):
+                reason = "idle"
                 break
             time.sleep(poll)
+        # Drive gone (or idle): the key stays in memory only to encrypt what is still being
+        # saved; nothing new is decrypted. Remove the copy as soon as nothing holds it.
+        warned = False
+        while True:
+            lock.touch()
+            seen = None  # force a content check
+            sync_if_changed()
+            try:
+                pending = plain.exists() and _digest(plain) != link.synced
+            except OSError:
+                pending = False  # unreadable while held: nothing we can sync yet
+            if pending:  # a save is still settling
+                time.sleep(poll)
+                continue
+            if _wipe(slot):
+                break
+            if not warned:
+                warned = True
+                on_held_open(
+                    f"The USB drive was removed while {plain.name} is still open.\n\n"
+                    "Close it in its program: your saves are encrypted back, and the "
+                    "plain copy is deleted as soon as it is closed."
+                )
+                on_event(f"{reason}: waiting for {plain.name} to be closed")
+            time.sleep(poll)
     finally:
-        with contextlib.suppress(OSError):
-            if plain.exists() and _digest(plain) != synced:
-                _sync_back(plain, source, key)
-        _wipe(slot)
+        if slot.exists():  # killed by an exception: leave the state for sweep()
+            with contextlib.suppress(OSError):
+                if plain.exists() and _digest(plain) != link.synced:
+                    _sync_back(plain, link, key, home)
+            _wipe(slot)
         on_event(f"closed {plain.name}")
+
+
+def _retire(slot: Path, key: bytes | None, home: Path) -> bool:
+    """Sync a dead helper's working copy back if it changed, then delete it.
+
+    Returns False (and keeps everything) when that is not possible yet: no key for unsynced
+    changes, or the file is still held open by a program.
+    """
+    link = _Link.load(slot)
+    for plain in [p for p in slot.iterdir() if not p.name.startswith(".")]:
+        try:
+            changed = link is not None and _digest(plain) != link.synced
+        except OSError:
+            return False  # held open: cannot even read it
+        if changed and link is not None:
+            if key is None:
+                return False
+            try:
+                _sync_back(plain, link, key, home)
+            except OSError:
+                return False
+    return _wipe(slot)
 
 
 def sweep(home: Path, key: bytes | None, *, stale_after: float = 10.0) -> int:
     """Clean up working copies whose helper died. Unsaved changes are synced back first.
 
-    Without ``key`` a slot with unsynced changes is left alone. Returns how many were removed.
+    A slot with unsynced changes is left alone without ``key``; one whose file is still held
+    open by a program is left for a later sweep. Returns how many were removed.
     """
     root = home / "open"
-    removed = 0
     if not root.is_dir():
         return 0
+    removed = 0
     for slot in root.iterdir():
         lock = slot / _LOCK
         if not slot.is_dir():
             continue
         if lock.exists() and time.time() - lock.stat().st_mtime < stale_after:
             continue  # a live helper
-        state = _read_state(slot)
-        files = [p for p in slot.iterdir() if not p.name.startswith(".")]
-        dirty = False
-        for plain in files:
-            if state.get("src") and _digest(plain) != state.get("synced"):
-                if key is None:
-                    dirty = True
-                    continue
-                with contextlib.suppress(OSError):
-                    _sync_back(plain, Path(str(state["src"])), key)
-        if not dirty:
-            _wipe(slot)
+        if _retire(slot, key, home):
             removed += 1
     return removed
 
@@ -301,6 +443,8 @@ class BoundFolders:
     """The folders the user asked to keep encrypted, plus the auto-encrypt setting.
 
     Stored as a small JSON file (``<home>/bound.json``) shared by the desktop app and the demo.
+    Each folder also remembers its file-system identity (device and file id, which survive a
+    rename), so :meth:`track` can follow a folder that was renamed or moved nearby.
     """
 
     def __init__(self, home: Path) -> None:
@@ -318,19 +462,46 @@ class BoundFolders:
         self._file.parent.mkdir(parents=True, exist_ok=True)
         self._file.write_text(json.dumps(data), encoding="utf-8")
 
-    def folders(self) -> list[Path]:
+    def _entries(self) -> list[dict[str, Any]]:
         raw = self._load().get("folders", [])
-        return [Path(p) for p in raw] if isinstance(raw, list) else []
+        if not isinstance(raw, list):
+            return []
+        return [e if isinstance(e, dict) else {"path": str(e), "id": None} for e in raw]
+
+    def folders(self) -> list[Path]:
+        return [Path(e["path"]) for e in self._entries() if e.get("path")]
 
     def add(self, folder: Path) -> None:
         folder = folder.resolve()
-        current = self.folders()
-        if folder not in current:
-            self._store(folders=[str(f) for f in [*current, folder]])
+        entries = self._entries()
+        if all(Path(e["path"]) != folder for e in entries):
+            entries.append({"path": str(folder), "id": _dir_id(folder)})
+            self._store(folders=entries)
 
     def remove(self, folder: Path) -> None:
         folder = folder.resolve()
-        self._store(folders=[str(f) for f in self.folders() if f.resolve() != folder])
+        self._store(folders=[e for e in self._entries() if Path(e["path"]).resolve() != folder])
+
+    def track(self) -> list[tuple[Path, Path]]:
+        """Follow bound folders that were renamed or moved. Returns ``(old, new)`` pairs."""
+        entries = self._entries()
+        moves: list[tuple[Path, Path]] = []
+        changed = False
+        for e in entries:
+            path = Path(e["path"])
+            if path.is_dir():
+                if not e.get("id"):
+                    e["id"], changed = _dir_id(path), True
+                continue
+            if not e.get("id"):
+                continue
+            found = _find_dir(path, e["id"])
+            if found is not None:
+                e["path"], changed = str(found), True
+                moves.append((path, found))
+        if changed:
+            self._store(folders=entries)
+        return moves
 
     @property
     def auto(self) -> bool:
@@ -339,6 +510,34 @@ class BoundFolders:
     @auto.setter
     def auto(self, value: bool) -> None:
         self._store(auto=bool(value))
+
+
+def _dir_id(path: Path) -> list[int] | None:
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    return [st.st_dev, st.st_ino] if st.st_ino else None
+
+
+def _find_dir(old: Path, ident: list[int], *, depth: int = 4, budget: int = 20_000) -> Path | None:
+    """Find the directory with identity ``ident`` near where ``old`` used to be."""
+    anchor = old.parent
+    while not anchor.is_dir() and anchor != anchor.parent:
+        anchor = anchor.parent
+    top = len(anchor.parts)
+    for dirpath, dirnames, _ in os.walk(anchor):
+        here = Path(dirpath)
+        if len(here.parts) - top >= depth:
+            dirnames[:] = []
+        dirnames[:] = [d for d in dirnames if not d.startswith(("$", "."))]
+        for d in dirnames:
+            budget -= 1
+            if budget <= 0:
+                return None
+            if _dir_id(here / d) == ident:
+                return here / d
+    return None
 
 
 def protect_folder(folder: Path, key: bytes, *, quiet_seconds: float = 2.0) -> int:
@@ -415,6 +614,8 @@ class FolderGuard:
 
     def step(self) -> int:
         """One poll. Returns how many files were auto-encrypted."""
+        for old, new in self.bound.track():
+            self._emit(f"Bound folder renamed: {old.name} -> {new}")
         if self.key is not None and not self.still_present():
             self.lock()
             self._set("waiting", "Drive removed. Waiting for the USB drive...")

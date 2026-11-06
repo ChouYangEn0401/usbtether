@@ -6,7 +6,9 @@ import argparse
 import contextlib
 import getpass
 import json
+import os
 import sys
+import threading
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
@@ -210,31 +212,57 @@ def _passphrase_source() -> Callable[[], bytes]:
     return ask
 
 
+def _leave_the_drive(home: Path) -> None:
+    """Work from the state folder. Explorer starts us in the folder of the double-clicked file;
+    if that is on the USB drive, Windows would refuse to eject it while we run."""
+    home.mkdir(parents=True, exist_ok=True)
+    os.chdir(home)
+
+
+def _warn_async(message: str) -> None:
+    """A message box that does not stop the helper (it keeps syncing behind it)."""
+    if sys.stdout is not None and sys.stdout.isatty():
+        print(f"warning: {message}", file=sys.stderr)
+    elif sys.platform == "win32":
+        import ctypes
+
+        flags = 0x30 | 0x1000 | 0x10000  # warning icon, system modal, set foreground
+        threading.Thread(
+            target=ctypes.windll.user32.MessageBoxW,
+            args=(None, message, "usbtether", flags),
+            daemon=True,
+        ).start()
+
+
 def _cmd_app(args: argparse.Namespace, probe: Callable[[], DeviceProbe], reg: Registry) -> int:
     from .desktop import run_app
 
-    home = Path(args.home) if args.home else default_home()
+    home = (Path(args.home) if args.home else default_home()).resolve()
+    _leave_the_drive(home)
     agent = Agent(probe(), passphrase=_passphrase_source(), secret_store=_store(args))
     return run_app(agent, Verifier(reg), home, minimized=args.minimized)
 
 
 def _cmd_open(args: argparse.Namespace, probe: Callable[[], DeviceProbe], reg: Registry) -> int:
-    home = Path(args.home) if args.home else default_home()
+    source = Path(args.file).resolve()  # before leaving the current folder
+    home = (Path(args.home) if args.home else default_home()).resolve()
+    _leave_the_drive(home)
     agent = Agent(probe(), passphrase=_passphrase_source(), secret_store=_store(args))
     guard = FolderGuard(agent, Verifier(reg), home)
     try:
         key = guard.ensure_key()  # verifies the drive, then sweeps crash leftovers
     except UsbTetherError as exc:
         _tell(
-            f"Cannot open {Path(args.file).name}: {exc}\nPlug in the enrolled drive and try again."
+            f"Cannot open {source.name}: {exc}\nPlug in the enrolled drive and try again."
         )
         return EXIT_FAILED
     open_encrypted(
-        Path(args.file),
+        source,
         key,
         home,
         present=guard.still_present,
         idle_timeout=args.idle_timeout,
+        on_held_open=_warn_async,
         on_event=lambda m: print(m, flush=True) if sys.stdout is not None else None,
     )
     return EXIT_OK
@@ -329,6 +357,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None, *, probe: DeviceProbe | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.home:
+        args.home = str(Path(args.home).resolve())  # stays valid if a command changes folder
     registry = Registry(Path(args.home) / "registry.json") if args.home else Registry.default()
     get_probe: Callable[[], DeviceProbe] = (lambda: probe) if probe else default_probe
     try:

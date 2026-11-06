@@ -2,6 +2,7 @@ import json
 import os
 import secrets
 import shutil
+import sys
 import threading
 import time
 
@@ -173,3 +174,129 @@ def test_folder_guard_follows_the_drive(stick, probe, registry, tmp_path):
     assert any("removed" in e for e in events)
     with pytest.raises(UsbTetherError):
         guard.ensure_key()
+
+
+class _Session:
+    """Run open_encrypted in a thread with a fake editor and a switchable drive."""
+
+    def __init__(self, source, home, **kw):
+        self.opened = []
+        self.plugged = threading.Event()
+        self.plugged.set()
+        self.events = []
+        self.warnings = []
+        self.thread = threading.Thread(
+            target=open_encrypted,
+            args=(source, KEY, home),
+            kwargs={
+                "present": self.plugged.is_set,
+                "open_file": self.opened.append,
+                "poll": 0.05,
+                "on_event": self.events.append,
+                "on_held_open": self.warnings.append,
+                **kw,
+            },
+        )
+        self.thread.start()
+        _wait(lambda: self.opened)
+        self.work = self.opened[0]
+
+    def save(self, data):
+        self.work.write_bytes(data)
+        past = time.time() - 5
+        os.utime(self.work, (past, past))
+
+
+def _wait(cond, timeout=5.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if cond():
+            return
+        time.sleep(0.02)
+    pytest.fail("timed out")
+
+
+def _plain(enc, tmp_path):
+    out = tmp_path / ("check-" + secrets.token_hex(4))
+    return decrypt_file(enc, KEY, dest_dir=out, keep=True).read_bytes()
+
+
+def test_renaming_the_folder_while_a_file_is_open(tmp_path):
+    source = _encrypted(tmp_path)  # tmp/docs/note.txt.utenc
+    s = _Session(source, tmp_path / "home")
+    (tmp_path / "docs").rename(tmp_path / "renamed")  # the user renames the folder
+    s.save(b"after rename")
+    moved = tmp_path / "renamed" / "note.txt.utenc"
+    _wait(lambda: _plain(moved, tmp_path) == b"after rename")
+    assert not (tmp_path / "docs").exists()  # the old folder is not recreated
+    s.plugged.clear()
+    s.thread.join(5)
+    assert not s.work.exists() and not s.work.parent.exists()
+
+
+def test_a_save_is_never_lost_when_the_file_is_gone(tmp_path):
+    source = _encrypted(tmp_path)
+    home = tmp_path / "home"
+    s = _Session(source, home)
+    source.unlink()  # deleted (or moved far away) while open
+    s.save(b"keep me")
+    _wait(lambda: list((home / "recovered").rglob("*.utenc")))
+    rescued = next((home / "recovered").rglob("note.txt.utenc"))
+    assert _plain(rescued, tmp_path) == b"keep me"
+    s.plugged.clear()
+    s.thread.join(5)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows file locking")
+def test_unplugging_while_a_program_holds_the_file(tmp_path):
+    source = _encrypted(tmp_path)
+    s = _Session(source, tmp_path / "home")
+    held = open(s.work, "rb")  # like Word: no delete sharing  # noqa: SIM115
+    try:
+        s.plugged.clear()  # pull the drive out
+        _wait(lambda: s.warnings)
+        assert s.thread.is_alive() and s.work.exists()  # cannot delete yet: still open
+        s.save(b"saved after unplug")  # the program saves once more
+        _wait(lambda: _plain(source, tmp_path) == b"saved after unplug")
+    finally:
+        held.close()  # the user closes the document
+    s.thread.join(5)
+    assert not s.thread.is_alive() and not s.work.parent.exists()
+    assert len(s.warnings) == 1
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows file locking")
+def test_killed_helper_with_the_file_still_open_is_cleaned_up_later(tmp_path):
+    source = _encrypted(tmp_path)
+    home = tmp_path / "home"
+
+    class Killed(Exception):
+        pass
+
+    held = []
+
+    def editor(path):
+        held.append(open(path, "rb"))  # noqa: SIM115
+        path.write_bytes(b"unsaved")
+        raise Killed
+
+    with pytest.raises(Killed):
+        open_encrypted(source, KEY, home, present=lambda: True, open_file=editor)
+    slot = next((home / "open").iterdir())
+    os.utime(slot / ".lock", (1, 1))
+    assert (slot / ".state").exists()  # state kept while the file is held
+    assert sweep(home, KEY) == 0 and slot.exists()
+    held[0].close()
+    assert sweep(home, KEY) == 1 and not slot.exists()
+    assert _plain(source, tmp_path) == b"unsaved"
+
+
+def test_bound_folder_rename_is_followed(tmp_path):
+    store = BoundFolders(tmp_path / "home")
+    folder = tmp_path / "work" / "secret"
+    folder.mkdir(parents=True)
+    store.add(folder)
+    folder.rename(tmp_path / "work" / "secret-2026")
+    assert store.track() == [(folder.resolve(), (tmp_path / "work" / "secret-2026").resolve())]
+    assert store.folders() == [(tmp_path / "work" / "secret-2026").resolve()]
+    assert store.track() == []

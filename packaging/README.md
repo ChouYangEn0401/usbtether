@@ -22,6 +22,10 @@ on double-click. Per-user install (`%LOCALAPPDATA%\Programs\usbtether`), no admi
 4. Double-click any `name.ext.utenc`. With the drive in, it opens in its usual program; every
    save is encrypted back. Without the drive a message says so.
 
+You can pull the drive out at any time and rename or move folders while files are open; see
+the table in [docs/usage.md §7b](../docs/usage.md) for exactly what happens. In short: no plain
+copy is left behind and no save is lost.
+
 Closing the panel stops auto-encryption only; double-click opening keeps working because it is
 a separate process (`usbtether.exe open "<file>"`) started by Explorer.
 
