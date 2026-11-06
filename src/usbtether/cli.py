@@ -252,9 +252,7 @@ def _cmd_open(args: argparse.Namespace, probe: Callable[[], DeviceProbe], reg: R
     try:
         key = guard.ensure_key()  # verifies the drive, then sweeps crash leftovers
     except UsbTetherError as exc:
-        _tell(
-            f"Cannot open {source.name}: {exc}\nPlug in the enrolled drive and try again."
-        )
+        _tell(f"Cannot open {source.name}: {exc}\nPlug in the enrolled drive and try again.")
         return EXIT_FAILED
     open_encrypted(
         source,
