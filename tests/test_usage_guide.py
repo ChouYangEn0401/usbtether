@@ -159,3 +159,19 @@ def test_exit_codes_table_matches_the_cli(cli, stick, tmp_path, monkeypatch):
     monkeypatch.setattr("usbtether.cli.default_probe", boom)
     assert main(["--home", str(tmp_path), "devices"]) == 3  # 3 platform
     del mount
+
+
+SRC = Path(__file__).resolve().parents[1]
+
+
+@pytest.mark.parametrize(
+    ("fragment", "source"),
+    [
+        ("enroll <drive> --remember --force", "examples/web_demo/app.py"),
+        ("cannot unprotect the stored secret", "src/usbtether/secretstore.py"),
+        ("the private key is passphrase-protected", "src/usbtether/token.py"),
+    ],
+)
+def test_messages_added_with_remember_exist_in_code_and_in_both_guides(fragment, source):
+    assert fragment in (SRC / source).read_text("utf-8"), f"{fragment!r} not in {source}"
+    documented(fragment)

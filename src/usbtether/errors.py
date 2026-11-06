@@ -53,3 +53,7 @@ class TokenLockedError(TokenError):
 
 class AmbiguousDeviceError(UsbTetherError):
     """More than one enrolled drive is present and none was selected."""
+
+
+class SecretStoreError(UsbTetherError):
+    """The host secret store could not read, write or decrypt a secret."""

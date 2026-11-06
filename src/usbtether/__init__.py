@@ -16,7 +16,7 @@ Typical use::
 See the README and ``docs/`` for the protocol and the (limited) security guarantees.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 from .agent import Agent, TokenCandidate
 from .authz import Authorizer, Capability, Session, capability_purpose
@@ -30,6 +30,7 @@ from .errors import (
     ProbeError,
     ProtocolError,
     RegistryError,
+    SecretStoreError,
     TokenError,
     TokenLockedError,
     UnsupportedDeviceError,
@@ -40,6 +41,13 @@ from .monitor import PresenceMonitor
 from .probe import DeviceProbe, InMemoryProbe, default_probe
 from .protocol import AuthResult, Challenge, FailureReason, Response
 from .registry import Registry, RegistryEntry
+from .secretstore import (
+    DpapiSecretStore,
+    FileSecretStore,
+    HostSecretStore,
+    NullSecretStore,
+    default_secret_store,
+)
 from .verifier import Verifier
 
 __all__ = [
@@ -54,9 +62,13 @@ __all__ = [
     "DeviceNotFoundError",
     "DeviceProbe",
     "DeviceReport",
+    "DpapiSecretStore",
     "EnrollmentResult",
     "FailureReason",
+    "FileSecretStore",
+    "HostSecretStore",
     "InMemoryProbe",
+    "NullSecretStore",
     "PresenceMonitor",
     "ProbeError",
     "ProtocolError",
@@ -64,6 +76,7 @@ __all__ = [
     "RegistryEntry",
     "RegistryError",
     "Response",
+    "SecretStoreError",
     "SerialQuality",
     "Session",
     "TokenCandidate",
@@ -78,5 +91,6 @@ __all__ = [
     "__version__",
     "capability_purpose",
     "default_probe",
+    "default_secret_store",
     "enroll",
 ]

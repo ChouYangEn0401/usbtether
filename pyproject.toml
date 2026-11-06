@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "usbtether"
-version = "0.1.0"
+version = "0.2.0"
 description = "Bind sessions to an ordinary USB drive: device-bound keys, challenge-response, short-lived capabilities."
 readme = "README.md"
 requires-python = ">=3.10"

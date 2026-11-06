@@ -149,3 +149,21 @@ def test_vault_usb_override_rejects_a_copied_token(demo, probe, registry, tmp_pa
     result = client.post("/api/vault/usb", json={"challenge_id": ch["challenge_id"]}).json()
     assert result["unlocked"] is False
     assert "device_mismatch" in result["message"]
+
+
+def test_demo_works_with_a_remembered_key_and_no_environment_variable(demo, probe, registry):
+    """The reported problem: a protected key made the demo unusable. --remember fixes it."""
+    client, _, mount = demo
+    enroll(probe, registry, mount, remember=True)
+    start = client.post("/api/guard/start", json={"total_steps": 2}).json()
+    assert start["started"], start
+    _, consumed = run_step(client, start["session_id"], 1)
+    assert consumed.status_code == 200
+
+
+def test_demo_explains_how_to_fix_a_locked_key(demo, probe, registry):
+    client, _, mount = demo
+    enroll(probe, registry, mount, passphrase=b"typed")
+    result = client.post("/api/guard/start", json={"total_steps": 2}).json()
+    assert result["started"] is False
+    assert "--remember" in result["reason"] and "USBTETHER_PASSPHRASE" in result["reason"]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import getpass
 import json
 import sys
@@ -16,9 +17,20 @@ from .enrollment import enroll
 from .errors import ProbeError, UsbTetherError
 from .probe import DeviceProbe, default_probe
 from .registry import Registry
+from .secretstore import HostSecretStore, default_secret_store
 from .verifier import Verifier
 
 EXIT_OK, EXIT_FAILED, EXIT_PLATFORM = 0, 1, 3
+
+_PROTECTION = {
+    "none": "no passphrase",
+    "passphrase": "passphrase",
+    "host-secret": "secret stored on this computer",
+}
+
+
+def _store(args: argparse.Namespace) -> HostSecretStore:
+    return default_secret_store(Path(args.home) if args.home else None)
 
 
 def _redact(serial: str | None) -> str | None:
@@ -81,12 +93,21 @@ def _cmd_devices(args: argparse.Namespace, probe: Callable[[], DeviceProbe], _: 
 def _cmd_enroll(args: argparse.Namespace, probe: Callable[[], DeviceProbe], reg: Registry) -> int:
     passphrase = _prompt_passphrase(confirm=True) if args.passphrase else None
     result = enroll(
-        probe(), reg, args.mount, label=args.label, passphrase=passphrase, overwrite=args.force
+        probe(),
+        reg,
+        args.mount,
+        label=args.label,
+        passphrase=passphrase,
+        remember=args.remember,
+        secret_store=_store(args),
+        overwrite=args.force,
     )
     print(f"Enrolled {args.mount}")
     print(f"  token id   : {result.token.token_id}")
     print(f"  device     : {result.device.vendor_id}:{result.device.product_id}")
-    print(f"  protected  : {'passphrase' if passphrase else 'no passphrase'}")
+    print(f"  protected  : {_PROTECTION[result.protection]}")
+    if result.protection == "host-secret":
+        print("  note       : unlocks automatically on this computer only")
     for old in result.revoked:
         print(f"  revoked    : {old} (replaced)")
     print("A challenge-response self-test passed.")
@@ -94,7 +115,11 @@ def _cmd_enroll(args: argparse.Namespace, probe: Callable[[], DeviceProbe], reg:
 
 
 def _cmd_verify(args: argparse.Namespace, probe: Callable[[], DeviceProbe], reg: Registry) -> int:
-    agent = Agent(probe(), passphrase=lambda: _prompt_passphrase(confirm=False))
+    agent = Agent(
+        probe(),
+        passphrase=lambda: _prompt_passphrase(confirm=False),
+        secret_store=_store(args),
+    )
     result = Verifier(reg).authenticate(agent, "cli-verify", args.mount)
     if result.ok:
         print(f"OK  token {result.token_id}")
@@ -123,6 +148,8 @@ def _cmd_list(_: argparse.Namespace, __: Callable[[], DeviceProbe], reg: Registr
 
 def _cmd_revoke(args: argparse.Namespace, _: Callable[[], DeviceProbe], reg: Registry) -> int:
     entry = reg.revoke(args.token_id)
+    with contextlib.suppress(UsbTetherError):  # drop the remembered unlock secret, if any
+        _store(args).delete(entry.token_id)
     print(f"Revoked {entry.token_id} at {entry.revoked_at}")
     return EXIT_OK
 
@@ -148,7 +175,16 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("enroll", help="write a token to a drive and register it on this host")
     p.add_argument("mount", help="drive letter or mount point, e.g. E: or /media/me/KEY")
     p.add_argument("--label", help="free-text note stored in the registry")
-    p.add_argument("--passphrase", action="store_true", help="encrypt the private key (prompts)")
+    protection = p.add_mutually_exclusive_group()
+    protection.add_argument(
+        "--passphrase", action="store_true", help="encrypt the private key (asks every time)"
+    )
+    protection.add_argument(
+        "--remember",
+        action="store_true",
+        help="encrypt the private key with a secret kept on this computer: no typing here, "
+        "useless without this computer",
+    )
     p.add_argument("--force", action="store_true", help="re-enroll; revokes the previous token")
     p.set_defaults(func=_cmd_enroll)
 

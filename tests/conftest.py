@@ -82,3 +82,9 @@ def add_stick(tmp_path, probe, name, serial, **kwargs):
     device = make_device(serial, mount=str(mount), **kwargs)
     probe.add(device)
     return device, mount
+
+
+@pytest.fixture(autouse=True)
+def _isolated_home(tmp_path_factory, monkeypatch):
+    """Never let a test touch the real per-user usbtether directory."""
+    monkeypatch.setenv("USBTETHER_HOME", str(tmp_path_factory.mktemp("usbtether-home")))

@@ -46,6 +46,7 @@ from usbtether.errors import (
 from usbtether.monitor import PresenceMonitor
 from usbtether.probe import DeviceProbe, default_probe
 from usbtether.registry import Registry
+from usbtether.secretstore import HostSecretStore
 from usbtether.verifier import Verifier
 
 RESOURCE = "demo-workflow"
@@ -92,7 +93,12 @@ def _explain(exc: Exception) -> tuple[str, bool]:
     if isinstance(exc, AuthorizationError):
         return f"{exc.reason}: {exc}", exc.reason in FATAL_REASONS
     if isinstance(exc, TokenLockedError):
-        return "The key is passphrase-protected. Set USBTETHER_PASSPHRASE and restart.", True
+        return (
+            "The key is passphrase-protected. Enroll it again with "
+            "'usbtether enroll <drive> --remember --force' (unlocks automatically on this "
+            "computer), or set USBTETHER_PASSPHRASE and restart.",
+            True,
+        )
     if isinstance(exc, UnsupportedDeviceError):
         return str(exc), True
     return str(exc), False
@@ -103,6 +109,7 @@ def create_app(
     registry: Registry | None = None,
     *,
     passphrase: bytes | None = None,
+    secret_store: HostSecretStore | None = None,
     monitor_interval: float | None = 1.0,
 ) -> FastAPI:
     """Build the app. ``monitor_interval=None`` disables the background thread (for tests)."""
@@ -113,7 +120,7 @@ def create_app(
 
     verifier = Verifier(registry)
     authorizer = Authorizer(verifier)
-    agent = Agent(probe, passphrase=passphrase)
+    agent = Agent(probe, passphrase=passphrase, secret_store=secret_store)
     monitor = PresenceMonitor(probe, authorizer, interval=monitor_interval or 1.0)
     workflows: dict[str, dict[str, int]] = {}
     vault: dict[str, dict[str, Any]] = {}

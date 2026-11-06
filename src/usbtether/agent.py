@@ -22,6 +22,7 @@ from .errors import (
 )
 from .probe.base import DeviceProbe
 from .protocol import Challenge, Response, b64url_encode, signing_payload
+from .secretstore import HostSecretStore, default_secret_store
 from .token import Token, has_token, load_private_key, read_token
 
 PassphraseSource = bytes | Callable[[], bytes | None] | None
@@ -42,16 +43,34 @@ class TokenCandidate:
 
 
 class Agent:
+    """Signs challenges with the token on a plugged-in drive.
+
+    If the private key is encrypted, the secret is taken from the host secret store (see
+    :mod:`usbtether.secretstore`) when it holds one for this token, and otherwise from
+    ``passphrase`` (bytes, or a callable that is only invoked when it is actually needed).
+    ``secret_store=None`` means the default store of this platform and user.
+    """
+
     def __init__(
         self,
         probe: DeviceProbe,
         *,
         passphrase: PassphraseSource = None,
+        secret_store: HostSecretStore | None = None,
         clock: Callable[[], float] = time.time,
     ) -> None:
         self._probe = probe
         self._passphrase = passphrase
+        self._secret_store = secret_store
         self._clock = clock
+
+    def _unlock_secret(self, token_id: str) -> bytes | None:
+        if self._secret_store is None:
+            self._secret_store = default_secret_store()
+        stored = self._secret_store.get(token_id)
+        if stored is not None:
+            return stored
+        return self._passphrase() if callable(self._passphrase) else self._passphrase
 
     def candidates(self) -> list[TokenCandidate]:
         """Every plugged-in drive that carries a readable token."""
@@ -92,10 +111,10 @@ class Agent:
             raise UnsupportedDeviceError(
                 f"drive reports no usable serial ({selected.device.serial_quality.value})"
             )
-        passphrase: bytes | None = None
-        if selected.token.key_encrypted:  # only ask for a passphrase when one is needed
-            passphrase = self._passphrase() if callable(self._passphrase) else self._passphrase
-        key = load_private_key(selected.token, passphrase)
+        secret = (
+            self._unlock_secret(selected.token.token_id) if selected.token.key_encrypted else None
+        )
+        key = load_private_key(selected.token, secret)
         report = selected.device.report(selected.volume)
         payload = signing_payload(
             challenge.nonce, challenge.purpose, selected.token.token_id, report
