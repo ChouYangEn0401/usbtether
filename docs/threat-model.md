@@ -29,7 +29,7 @@ drive is plugged in to a host that trusts the registry.
 | Use a drive with no real serial | Such drives cannot be enrolled, and their responses are refused. They are not silently downgraded. |
 | Keep acting after unplugging | The presence monitor revokes the session; capabilities are re-checked against it and expire in seconds. |
 | Spend one capability twice, or for another resource | Single use, HMAC-signed, scoped to one `(resource, action)`. |
-| Steal the drive and read the key (optional) | With a passphrase the key is stored encrypted. |
+| Lose the drive, or have it taken, and read the key | With `--passphrase` or `--remember` the key on the drive is encrypted. The passphrase is typed, or the secret stays on your computer (DPAPI on Windows) and never on the drive. |
 
 ## What it does **not** stop
 
@@ -39,10 +39,11 @@ drive is plugged in to a host that trusts the registry.
 | **Imaging the whole drive** | A raw image copies the key too. The copy authenticates *only if* the destination also reports the original descriptor; see the previous row. |
 | **A compromised host** | Malware can read the key, call the agent, patch the verifier or the registry. |
 | **A lying remote agent** | If agent and verifier are on different machines, the device report is a *claim* of the agent's host. It is signed, but unattested. |
-| **Stolen drive, no passphrase** | Possession of the unencrypted drive is possession of the credential, for as long as the registry entry is active. Revoke it. |
+| **Stolen drive with an unencrypted key** | Possession of the drive is possession of the credential, for as long as the registry entry is active. Revoke it. |
+| **Anyone logged in as you, or malware, with `--remember`** | The remembered secret unlocks silently for your Windows account. DPAPI separates accounts and machines, not processes. On Linux the secret file is protected by file permissions only. |
 | **Tampering with the registry** | Not authenticated. |
 | **Instant detection of unplugging** | Detection is polling (default 1 s), plus capability lifetime (8 s) as a second bound. |
-| **Brute forcing the passphrase offline** | An attacker holding the drive can try passphrases offline; use a strong one. |
+| **Brute forcing a typed passphrase offline** | An attacker holding the drive can try passphrases offline; use a strong one. (A `--remember` secret is 256 random bits.) |
 
 ## Why the signature does not prove the drive is genuine
 

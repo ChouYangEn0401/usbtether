@@ -54,7 +54,7 @@ Directory `<mount>/.usbtether/`:
 
 | File | Content |
 |---|---|
-| `private_key.pem` | Ed25519 private key, PKCS#8 PEM. Optionally encrypted with a passphrase (`BestAvailableEncryption`). |
+| `private_key.pem` | Ed25519 private key, PKCS#8 PEM. Optionally encrypted (`BestAvailableEncryption`) with a typed passphrase, or with a random secret from the host secret store (4.1). |
 | `token.json` | Public description, written **last** (commit marker). |
 
 ```json
@@ -72,6 +72,15 @@ Directory `<mount>/.usbtether/`:
 Readers MUST reject a token whose `format`/`version` is unknown, whose `token_id` is not a
 UUID, whose public key is not 32 bytes, or whose private key does not derive the stated
 public key.
+
+### 4.1 Host secret store (non-normative)
+
+Enrollment with `remember` encrypts the key with 32 random bytes (64 hex characters) that are
+stored **only on the host**, one file per token id, `secrets/<token_id>.bin` next to the
+registry. On Windows the file content is sealed with DPAPI (`CryptProtectData`, current user,
+no UI); elsewhere it is a file with owner-only permissions. The agent consults the store
+first and falls back to a supplied passphrase. The store never changes what is signed or
+verified; it only decides how the private key file is unlocked.
 
 ## 5. Host registry
 

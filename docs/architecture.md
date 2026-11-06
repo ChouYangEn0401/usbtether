@@ -10,6 +10,7 @@ src/usbtether/
     memory.py     in-memory probe for tests and development
   token.py        on-drive credential: create / read / unlock
   registry.py     host-side trust anchor (JSON file)
+  secretstore.py  host-side secret store for --remember keys (DPAPI on Windows)
   protocol.py     Challenge, Response, AuthResult, signing payload
   agent.py        reads the drive, signs challenges
   verifier.py     issues challenges, verifies responses
@@ -60,11 +61,14 @@ trusts the helper's device report. A transport between them is not part of this 
 |---|---|---|
 | private key, token metadata | the USB drive | until the drive is wiped |
 | public keys, fingerprints, revocations | `registry.json` on the host | persistent |
+| unlock secrets of `--remember` keys | `secrets/` next to the registry (DPAPI-sealed on Windows) | persistent |
 | pending challenges, sessions, capabilities, capability HMAC key | process memory | lost on restart (fail-safe) |
 
 ## Extension points
 
 * **Another OS**: subclass `DeviceProbe`.
+* **Another secret store** (OS keyring, TPM, remote vault): implement `HostSecretStore`
+  (`get`, `put`, `delete`) and pass it to `enroll` and `Agent`.
 * **Another registry backend** (database, remote service): replace `Registry`; the verifier
   needs only `get`, and enrollment needs `add`, `remove`, `revoke`, `active_for_fingerprint`.
 * **Another transport** between agent and verifier: serialise the dataclasses with `to_dict`.

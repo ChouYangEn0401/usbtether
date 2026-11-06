@@ -44,19 +44,23 @@ another drive. If you have two drives of the same model, check that their serial
 ## 3. Enroll (once per drive)
 
 ```
-usbtether enroll E: --label "my key" --passphrase
+usbtether enroll E: --label "my key" --remember
 ```
 
 * `E:` is the drive letter *now*. The letter is not part of the identity, so it may change later.
-* `--passphrase` encrypts the private key on the drive and asks you for a passphrase twice.
-  Without it, anyone holding the drive holds the credential. **There is no passphrase
-  recovery**; if you forget it, enroll again with `--force`.
 * `--label` is a free-text note shown by `usbtether list`.
+* The protection option decides how the private key on the drive is stored:
+
+| Option | Typing | What it means |
+|---|---|---|
+| `--remember` (**recommended on your own computer**) | never | The key is encrypted with a random secret that is kept on **this computer** (Windows DPAPI, bound to your Windows account), never on the drive. Plug in and use. The drive cannot sign anything without this computer's secret. It unlocks only on this computer and account. |
+| `--passphrase` | every use | The key is encrypted with a passphrase you type twice now and on every use. Works on any computer. **There is no recovery**; if you forget it, enroll again with `--force`. |
+| *(neither)* | never | The key is stored unencrypted. Anyone who holds the drive holds the key. |
 
 What happens: a key pair is created on the drive in a `.usbtether` folder; the public key and
 the drive's hardware fingerprint are saved on **this computer**; a real challenge-response is
 run as a self-test. Only `A challenge-response self-test passed.` means success. Any failure
-removes everything it wrote.
+removes everything it wrote, including a remembered secret.
 
 The drive still works for normal files. Just do not delete or edit `.usbtether`.
 
@@ -69,7 +73,8 @@ usbtether verify
 `OK  token <id>` means: the right key, on the right physical drive, right now. If several
 enrolled drives are plugged in, name one: `usbtether verify E:`.
 
-If the key is passphrase-protected you are asked for it (only then).
+With `--remember` nothing is asked. With `--passphrase` you are asked for the passphrase
+(only then).
 
 ## 5. Check that copying does not work
 
@@ -108,8 +113,9 @@ with PresenceMonitor(probe, authorizer):  # unplugging revokes the session
 * Failures raise `usbtether.UsbTetherError` (no drive, wrong drive, locked key, ...) or
   `usbtether.AuthorizationError` (carries a stable `.reason`, for example `session_inactive`,
   `capability_used`, `device_mismatch`).
-* Protected key? Pass `Agent(probe, passphrase=b"...")`, or a callable returning the passphrase
-  (it is called only when the key is actually encrypted).
+* Protected key? A key enrolled with `--remember` unlocks automatically (the agent consults the
+  host secret store first). For a `--passphrase` key pass `Agent(probe, passphrase=b"...")`, or a
+  callable returning the passphrase (called only when the key is actually encrypted).
 
 A complete, tested example: [examples/sdk_quickstart.py](../examples/sdk_quickstart.py).
 
@@ -119,7 +125,7 @@ A complete, tested example: [examples/sdk_quickstart.py](../examples/sdk_quickst
 python examples\web_demo\app.py
 ```
 
-Open <http://127.0.0.1:8000>. For a passphrase-protected key set the variable first:
+Open <http://127.0.0.1:8000>. A key enrolled with `--remember` just works. For a `--passphrase` key set the variable first:
 `$env:USBTETHER_PASSPHRASE="..."` (PowerShell) or `set USBTETHER_PASSPHRASE=...` (cmd).
 Details: [examples/web_demo/README.md](../examples/web_demo/README.md).
 
@@ -140,14 +146,19 @@ holds a copy of the registry.
 **Reformatted or wiped drive.** The token is gone from the drive but this computer still
 remembers it. Run `usbtether enroll E: --force`.
 
-**Forgot the passphrase.** Nothing can recover the key. `usbtether enroll E: --force` replaces
-it with a new one (this works because it never needs the old key).
+**Forgot the passphrase, or lost the remembered secret** (reinstalled Windows, new Windows
+account). Nothing can recover the key. `usbtether enroll E: --force` replaces it with a new
+one (this works because it never needs the old key).
+
+**Change how the key is protected.** Enroll again: `usbtether enroll E: --remember --force`
+(or `--passphrase`, or neither). The previous token is revoked.
 
 **One drive on several computers.** Each computer decides from its own registry. The drive's
 hardware fingerprint is the same on every computer, so copy the registry file from the
 computer where you enrolled to the same place on the other one (see section 9). There is no
 automatic sync. Do *not* run `enroll --force` on the second computer: that would replace the
-key on the drive and break the first.
+key on the drive and break the first. A `--remember` key unlocks only where it was enrolled; for
+several computers use `--passphrase` (or no encryption).
 
 ## 9. Where things are stored
 
@@ -155,6 +166,7 @@ key on the drive and break the first.
 |---|---|
 | Private key, token description | on the drive: `<drive>\.usbtether\private_key.pem`, `token.json` |
 | Public keys, drive fingerprints, revocations | Windows: `%APPDATA%\usbtether\registry.json`; Linux: `~/.local/share/usbtether/registry.json` |
+| Secrets for `--remember` keys | Windows: `%APPDATA%\usbtether\secrets\<token id>.bin`, sealed with DPAPI (only your Windows account can read it); Linux: the same path, owner-only file permissions |
 | Sessions, capabilities, challenges | process memory only; gone when the program exits |
 
 Treat `registry.json` like a credential store (whoever can write it can enroll tokens), and
@@ -186,6 +198,9 @@ never commit `.usbtether/` or `registry.json` to version control (the repository
 | `FAILED  device_unsupported` | The drive reported no usable serial. |
 | `FAILED  bad_signature` | The key does not match the registry (replaced or corrupted). Enroll again. |
 | `error: wrong passphrase or corrupt private key` | Retype the passphrase; if forgotten, see section 8. |
+| Web demo: `The key is passphrase-protected. Enroll it again with 'usbtether enroll <drive> --remember --force' ...` | The key needs a passphrase the demo cannot ask for. Enroll again with `--remember --force`, or set `USBTETHER_PASSPHRASE` and restart. |
+| `error: the private key is passphrase-protected` | A library call found an encrypted key and no secret. Enroll with `--remember`, or pass `passphrase=` to `Agent`. |
+| `error: cannot unprotect the stored secret (was it saved by another Windows user?)` | The `--remember` secret was saved under a different Windows account or machine. Enroll again with `--remember --force` on this account. |
 | `error: could not run PowerShell: ...` / `PowerShell exited with ...` | `powershell.exe` is missing, blocked by policy, or slow. Run `powershell -NoProfile -Command "Get-CimInstance Win32_DiskDrive"` to see whether it works at all. |
 | `error: usbtether has no USB probe for platform 'darwin'` | Only Windows and Linux are supported. |
 | `error: cannot read registry ...` | `registry.json` is corrupt or unreadable. Restore a copy or delete it and re-enroll. |

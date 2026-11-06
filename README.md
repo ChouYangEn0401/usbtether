@@ -16,6 +16,8 @@ and can re-check that on every sensitive step.
 * **Short-lived authority.** A session grants nothing by itself. Each protected operation
   needs its own challenge and yields a single-use, scoped capability that expires in seconds.
   Unplugging the drive revokes the session.
+* **Plug and use.** `--remember` encrypts the key with a secret kept on *your computer*
+  (Windows DPAPI), so there is nothing to type, and the drive cannot sign without that computer.
 * **Works with drives you already own.** No special hardware.
 
 > [!IMPORTANT]
@@ -30,7 +32,7 @@ Alpha (0.1.x). The protocol, token format and API may change before 1.0.
 
 | Platform | Support |
 |---|---|
-| Windows 10/11 | Primary target. Discovery uses PowerShell/CIM. The parser is unit-tested against recorded output and the script is smoke-tested in CI; it has not yet been validated against a wide range of real drives. Please report your results. |
+| Windows 10/11 | Primary target. Discovery uses PowerShell/CIM. Confirmed working on a real Windows machine with one USB 3.0 flash drive (enroll and verify); the parser is unit-tested against recorded output and the script is smoke-tested in CI. Not yet validated across many drives: please report your results. |
 | Linux | Experimental (sysfs). Mostly for development and CI. |
 | macOS | Not supported. |
 
@@ -61,11 +63,12 @@ Step-by-step Windows guide, day-to-day management and troubleshooting: **[docs/u
     mounted  : E:\
     bindable : yes
 
-> usbtether enroll E: --label "desk key" --passphrase
+> usbtether enroll E: --label "desk key" --remember
 Enrolled E:
   token id   : 0b6a0c4e-6c67-4b0c-9a58-2a7d1f4a8d11
   device     : 0781:5567
-  protected  : passphrase
+  protected  : secret stored on this computer
+  note       : unlocks automatically on this computer only
 A challenge-response self-test passed.
 
 > usbtether verify
@@ -149,7 +152,7 @@ Device identity: [docs/device-identity.md](docs/device-identity.md).
 | Acting after the drive is unplugged | stopped (polling, plus 8 s capability lifetime) |
 | A drive that reports the same USB descriptor (reprogrammed controller, virtual device) | **not stopped** |
 | Malware on the host | **not stopped** |
-| Someone who steals an unprotected drive | **not stopped** until you revoke it; use `--passphrase` |
+| Someone who gets an unprotected drive | **not stopped** until you revoke it; use `--remember` or `--passphrase` |
 
 ## Prior art
 

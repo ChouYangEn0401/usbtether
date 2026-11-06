@@ -9,6 +9,7 @@ usbtether 把一般的 USB 隨身碟變成「在場證明型」憑證：程式�
 * **綁定實體裝置**：憑證是存放在隨身碟上的 Ed25519 金鑰，並且在主機端與該隨身碟的 USB 描述資訊（廠商 ID、產品 ID、序號）綁定。把檔案複製到另一支隨身碟，得到的不是可用的複本。
 * **挑戰—回應（challenge-response）**：每次驗證都是全新、單次使用、綁定用途的 challenge，由 token 簽章，無法重放。
 * **短效授權**：Session 本身不給任何權限。每個受保護的操作都需要自己的 challenge，並取得單次使用、限定範圍、數秒內到期的 capability。拔掉隨身碟會撤銷 session。
+* **插上就能用**：`--remember` 用一個只存在*你電腦*上的密鑰（Windows DPAPI）加密私鑰，不用輸入任何東西，而且沒有那台電腦，隨身碟本身無法簽章。
 * **用你現有的隨身碟就能做**：不需要特殊硬體。
 
 > [!IMPORTANT]
@@ -20,7 +21,7 @@ Alpha（0.1.x）。1.0 之前，協定、token 格式與 API 都可能變動。
 
 | 平台 | 支援程度 |
 |---|---|
-| Windows 10/11 | 主要目標。裝置探測使用 PowerShell/CIM。解析器已用錄製的輸出做單元測試，CI 會執行腳本做冒煙測試；尚未在大量真實隨身碟上驗證，歡迎回報你的結果。 |
+| Windows 10/11 | 主要目標。裝置探測使用 PowerShell/CIM。已在一台真實 Windows 電腦、搭配一支 USB 3.0 隨身碟上確認可用（註冊與驗證）；解析器有用錄製的輸出做單元測試，CI 也會執行腳本做冒煙測試。尚未在大量隨身碟上驗證，歡迎回報你的結果。 |
 | Linux | 實驗性（sysfs），主要供開發與 CI 使用。 |
 | macOS | 不支援。 |
 
@@ -50,11 +51,12 @@ Windows 逐步教學、日常管理與疑難排解：**[docs/usage.zh-TW.md](doc
     mounted  : E:\
     bindable : yes
 
-> usbtether enroll E: --label "desk key" --passphrase
+> usbtether enroll E: --label "desk key" --remember
 Enrolled E:
   token id   : 0b6a0c4e-6c67-4b0c-9a58-2a7d1f4a8d11
   device     : 0781:5567
-  protected  : passphrase
+  protected  : secret stored on this computer
+  note       : unlocks automatically on this computer only
 A challenge-response self-test passed.
 
 > usbtether verify
@@ -126,7 +128,7 @@ python examples/web_demo/app.py        # http://127.0.0.1:8000
 | 隨身碟拔除後繼續操作 | 能擋（輪詢偵測，加上 capability 8 秒壽命） |
 | 回報相同 USB 描述資訊的裝置（改寫控制器韌體、虛擬裝置） | **擋不住** |
 | 主機上的惡意程式 | **擋不住** |
-| 有人偷走沒有加密的隨身碟 | 在你撤銷之前**擋不住**；請使用 `--passphrase` |
+| 有人拿到沒有加密的隨身碟 | 在你撤銷之前**擋不住**；請使用 `--remember` 或 `--passphrase` |
 
 ## 相關作品
 

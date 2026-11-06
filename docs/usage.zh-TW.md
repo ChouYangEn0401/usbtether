@@ -39,14 +39,20 @@ usbtether devices
 ## 3. 註冊（每支隨身碟做一次）
 
 ```
-usbtether enroll E: --label "my key" --passphrase
+usbtether enroll E: --label "my key" --remember
 ```
 
 * `E:` 是**目前**的磁碟機代號。代號不屬於身分資訊，之後變動也沒關係。
-* `--passphrase` 會用口令加密隨身碟上的私鑰，並要你輸入兩次。不加的話，拿到隨身碟的人就等於拿到憑證。**口令無法找回**；忘記時用 `--force` 重新註冊。
 * `--label` 是備註文字，會顯示在 `usbtether list`。
+* 保護選項決定碟上的私鑰如何存放：
 
-過程：在隨身碟的 `.usbtether` 資料夾建立金鑰對；把公鑰與這支碟的硬體指紋存在**這台電腦**；再跑一次真正的 challenge-response 當自我測試。只有看到 `A challenge-response self-test passed.` 才算成功，任何失敗都會把寫入的東西全部清掉。
+| 選項 | 要輸入嗎 | 意義 |
+|---|---|---|
+| `--remember`（**在自己的電腦上建議使用**） | 不用 | 私鑰用一個隨機密鑰加密，這個密鑰只存在**這台電腦**（Windows DPAPI，綁定你的 Windows 帳號），不會放在隨身碟上。插上就能用。沒有這台電腦的密鑰，隨身碟本身無法簽署任何東西。只能在這台電腦、這個帳號解鎖。 |
+| `--passphrase` | 每次都要 | 私鑰用口令加密，現在輸入兩次，之後每次使用都要輸入。可用在任何電腦。**口令無法找回**；忘記時用 `--force` 重新註冊。 |
+| （都不加） | 不用 | 私鑰不加密。拿到隨身碟的人就等於拿到金鑰。 |
+
+過程：在隨身碟的 `.usbtether` 資料夾建立金鑰對；把公鑰與這支碟的硬體指紋存在**這台電腦**；再跑一次真正的 challenge-response 當自我測試。只有看到 `A challenge-response self-test passed.` 才算成功，任何失敗都會把寫入的東西全部清掉，包括記住的密鑰。
 
 隨身碟照常可以存一般檔案，只要不要刪除或修改 `.usbtether`。
 
@@ -58,7 +64,7 @@ usbtether verify
 
 `OK  token <id>` 代表：正確的金鑰、在正確的實體隨身碟上、而且是現在。如果同時插了多支已註冊的碟，要指定一支：`usbtether verify E:`。
 
-如果私鑰有設口令，才會要求你輸入口令。
+用 `--remember` 註冊的不會問任何東西；用 `--passphrase` 的才會要求輸入口令。
 
 ## 5. 確認複製沒有用
 
@@ -92,7 +98,7 @@ with PresenceMonitor(probe, authorizer):  # 拔除就撤銷 session
 * **Session** 本身不給任何權限。每個受保護的操作都要自己的 capability，而取得 capability 需要與隨身碟重新做一次 challenge-response。
 * Capability 只能用一次、只限一組 `(resource, action)`、8 秒內有效。
 * 失敗會丟出 `usbtether.UsbTetherError`（沒插碟、碟不對、金鑰被鎖…）或 `usbtether.AuthorizationError`（帶有穩定的 `.reason`，例如 `session_inactive`、`capability_used`、`device_mismatch`）。
-* 私鑰有口令？用 `Agent(probe, passphrase=b"...")`，或傳入一個回傳口令的函式（只有金鑰真的有加密時才會被呼叫）。
+* 私鑰有保護？用 `--remember` 註冊的會自動解鎖（agent 會先查 host 端的密鑰庫）。`--passphrase` 的金鑰則用 `Agent(probe, passphrase=b"...")`，或傳入一個回傳口令的函式（只有金鑰真的有加密時才會被呼叫）。
 
 完整且有測試的範例：[examples/sdk_quickstart.py](../examples/sdk_quickstart.py)。
 
@@ -102,7 +108,7 @@ with PresenceMonitor(probe, authorizer):  # 拔除就撤銷 session
 python examples\web_demo\app.py
 ```
 
-開啟 <http://127.0.0.1:8000>。私鑰有設口令的話，先設環境變數：`$env:USBTETHER_PASSPHRASE="..."`（PowerShell）或 `set USBTETHER_PASSPHRASE=...`（cmd）。詳見 [examples/web_demo/README.md](../examples/web_demo/README.md)。
+開啟 <http://127.0.0.1:8000>。用 `--remember` 註冊的直接可用；`--passphrase` 的要先設環境變數：`$env:USBTETHER_PASSPHRASE="..."`（PowerShell）或 `set USBTETHER_PASSPHRASE=...`（cmd）。詳見 [examples/web_demo/README.md](../examples/web_demo/README.md)。
 
 ## 8. 日常管理
 
@@ -118,9 +124,11 @@ python examples\web_demo\app.py
 
 **隨身碟被格式化或清空。** 碟上的 token 沒了，但這台電腦還記得它。執行 `usbtether enroll E: --force`。
 
-**忘記口令。** 沒有任何方法可以找回金鑰。用 `usbtether enroll E: --force` 換一把新的（這個流程不需要舊金鑰）。
+**忘記口令，或遺失記住的密鑰**（重灌 Windows、換了 Windows 帳號）。沒有任何方法可以找回金鑰。用 `usbtether enroll E: --force` 換一把新的（這個流程不需要舊金鑰）。
 
-**同一支碟在多台電腦使用。** 每台電腦各自依自己的 registry 判斷。隨身碟的硬體指紋在每台電腦上都一樣，所以把註冊那台的 registry 檔複製到另一台的相同位置即可（見第 9 節）。目前沒有自動同步。**不要**在第二台電腦上執行 `enroll --force`，那會替換碟上的金鑰，讓第一台失效。
+**更改金鑰的保護方式。** 重新註冊：`usbtether enroll E: --remember --force`（或 `--passphrase`、或都不加）。先前的 token 會被撤銷。
+
+**同一支碟在多台電腦使用。** 每台電腦各自依自己的 registry 判斷。隨身碟的硬體指紋在每台電腦上都一樣，所以把註冊那台的 registry 檔複製到另一台的相同位置即可（見第 9 節）。目前沒有自動同步。**不要**在第二台電腦上執行 `enroll --force`，那會替換碟上的金鑰，讓第一台失效。用 `--remember` 的金鑰只能在註冊它的那台電腦解鎖；要在多台電腦使用，請用 `--passphrase`（或不加密）。
 
 ## 9. 資料存放位置
 
@@ -128,6 +136,7 @@ python examples\web_demo\app.py
 |---|---|
 | 私鑰、token 說明檔 | 在隨身碟上：`<磁碟機>\.usbtether\private_key.pem`、`token.json` |
 | 公鑰、裝置指紋、撤銷紀錄 | Windows：`%APPDATA%\usbtether\registry.json`；Linux：`~/.local/share/usbtether/registry.json` |
+| `--remember` 金鑰的密鑰 | Windows：`%APPDATA%\usbtether\secrets\<token id>.bin`，以 DPAPI 封裝（只有你的 Windows 帳號讀得出來）；Linux：同路徑，僅擁有者可讀的檔案權限 |
 | Session、capability、challenge | 只在程式記憶體中，程式結束就消失 |
 
 請把 `registry.json` 當成憑證庫看待（誰能寫入它，誰就能註冊 token），並且不要把 `.usbtether/` 或 `registry.json` 提交到版本控制（專案的 `.gitignore` 已排除）。
@@ -157,6 +166,9 @@ python examples\web_demo\app.py
 | `FAILED  device_unsupported` | 這支碟沒有回報可用的序號。 |
 | `FAILED  bad_signature` | 金鑰與 registry 不符（被替換或損毀）。重新註冊。 |
 | `error: wrong passphrase or corrupt private key` | 重新輸入口令；忘記的話見第 8 節。 |
+| Web demo：`The key is passphrase-protected. Enroll it again with 'usbtether enroll <drive> --remember --force' ...` | 金鑰需要口令，而 demo 無法詢問。用 `--remember --force` 重新註冊，或設定 `USBTETHER_PASSPHRASE` 後重啟。 |
+| `error: the private key is passphrase-protected` | 函式庫呼叫遇到加密的金鑰，卻沒有密鑰可用。用 `--remember` 註冊，或對 `Agent` 傳入 `passphrase=`。 |
+| `error: cannot unprotect the stored secret (was it saved by another Windows user?)` | `--remember` 的密鑰是在別的 Windows 帳號或別台電腦存的。在這個帳號用 `--remember --force` 重新註冊。 |
 | `error: could not run PowerShell: ...` / `PowerShell exited with ...` | 找不到 `powershell.exe`、被政策封鎖，或太慢。執行 `powershell -NoProfile -Command "Get-CimInstance Win32_DiskDrive"` 看它本身能不能運作。 |
 | `error: usbtether has no USB probe for platform 'darwin'` | 只支援 Windows 與 Linux。 |
 | `error: cannot read registry ...` | `registry.json` 損毀或無法讀取。還原備份，或刪除後重新註冊。 |

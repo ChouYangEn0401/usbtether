@@ -6,6 +6,22 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0]
+
+### Added
+- `usbtether enroll --remember`: encrypt the private key with a random secret kept on the
+  computer (Windows DPAPI; owner-only file elsewhere) so the drive unlocks without typing and is
+  useless without that computer. The agent consults the host secret store automatically.
+- `HostSecretStore` with `DpapiSecretStore`, `FileSecretStore` and `NullSecretStore`.
+- `enroll(..., remember=True, secret_store=...)` and `Agent(..., secret_store=...)`.
+
+### Changed
+- `usbtether revoke` also removes the remembered secret; re-enrolling removes a stale one;
+  a failed enrollment leaves no secret behind.
+- The web demo explains how to fix a locked key instead of only asking for an environment
+  variable.
+- Confirmed on a real Windows machine and USB 3.0 drive (enroll and verify).
+
 ## [0.1.0]
 
 First public version.
@@ -34,5 +50,6 @@ First public version.
 - Removal detection is polling-based.
 - The registry is neither signed nor encrypted.
 
-[Unreleased]: ../../compare/v0.1.0...HEAD
+[Unreleased]: ../../compare/v0.2.0...HEAD
+[0.2.0]: ../../compare/v0.1.0...v0.2.0
 [0.1.0]: ../../releases/tag/v0.1.0
