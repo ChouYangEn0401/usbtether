@@ -266,3 +266,14 @@ def test_malformed_response_dicts(bad):
 
 def test_clock_fixture_is_independent():
     assert Clock(5).now == 5
+
+
+def test_unencrypted_token_never_triggers_the_passphrase_callback(stick, probe, registry, clock):
+    _, mount = stick
+    enroll(probe, registry, mount)
+
+    def must_not_be_called():
+        raise AssertionError("asked for a passphrase although the key is not encrypted")
+
+    agent = Agent(probe, passphrase=must_not_be_called, clock=clock)
+    assert Verifier(registry, clock=clock).authenticate(agent, "login", mount).ok

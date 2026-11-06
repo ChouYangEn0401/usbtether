@@ -92,8 +92,10 @@ class Agent:
             raise UnsupportedDeviceError(
                 f"drive reports no usable serial ({selected.device.serial_quality.value})"
             )
-        passphrase = self._passphrase() if callable(self._passphrase) else self._passphrase
-        key = load_private_key(selected.token, passphrase if selected.token.key_encrypted else None)
+        passphrase: bytes | None = None
+        if selected.token.key_encrypted:  # only ask for a passphrase when one is needed
+            passphrase = self._passphrase() if callable(self._passphrase) else self._passphrase
+        key = load_private_key(selected.token, passphrase)
         report = selected.device.report(selected.volume)
         payload = signing_payload(
             challenge.nonce, challenge.purpose, selected.token.token_id, report
