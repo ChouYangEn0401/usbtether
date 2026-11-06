@@ -1,4 +1,5 @@
 import importlib.util
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -7,6 +8,8 @@ import pytest
 
 pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
+import contextlib
+
 from fastapi.testclient import TestClient
 
 from usbtether.enrollment import enroll
@@ -15,6 +18,9 @@ from usbtether.token import TOKEN_DIR
 from .conftest import add_stick
 
 APP_PATH = Path(__file__).resolve().parents[1] / "examples" / "web_demo" / "app.py"
+
+
+TEST_CLASSES = r"Software\usbtether-test\Classes"
 
 
 def load_demo():
@@ -26,9 +32,18 @@ def load_demo():
 
 
 @pytest.fixture
-def demo(stick, probe, registry):
+def demo(stick, probe, registry, tmp_path):
     _, mount = stick
-    app = load_demo().create_app(probe, registry, monitor_interval=None)
+    launched = []
+    app = load_demo().create_app(
+        probe,
+        registry,
+        monitor_interval=None,
+        assoc_classes=TEST_CLASSES,
+        launcher=launched.append,
+        search_roots=[tmp_path],
+    )
+    app.state.launched = launched
     return TestClient(app), app, mount
 
 
@@ -188,33 +203,121 @@ def test_enroll_twice_needs_force(demo):
     assert forced["ok"] and len(forced["revoked"]) == 1
 
 
-def test_file_vault_follows_the_drive(demo, stick):
+def test_encrypt_and_decrypt_anywhere(demo, tmp_path):
+    client, _, mount = demo
+    client.post("/api/usb/enroll", json={"mount": str(mount)})
+    src = tmp_path / "docs"
+    (src / "sub").mkdir(parents=True)
+    (src / "a.txt").write_bytes(b"one")
+    (src / "sub" / "b.txt").write_bytes(b"two")
+
+    # in place, keeping the original
+    r = client.post("/api/crypt/encrypt", json={"paths": [str(src / "a.txt")]}).json()
+    assert r["ok"] and (src / "a.txt").exists() and (src / "a.txt.utenc").exists()
+
+    # a folder to another place, deleting the originals
+    out = tmp_path / "out"
+    r = client.post(
+        "/api/crypt/encrypt",
+        json={
+            "paths": [str(src / "sub")],
+            "delete_source": True,
+            "dest": "custom",
+            "dest_dir": str(out),
+        },
+    ).json()
+    assert r["ok"] and not (src / "sub" / "b.txt").exists()
+    assert (out / "sub" / "b.txt.utenc").is_file()
+
+    back = tmp_path / "back"
+    r = client.post(
+        "/api/crypt/decrypt",
+        json={
+            "paths": [str(out / "sub" / "b.txt.utenc")],
+            "delete_source": True,
+            "dest": "custom",
+            "dest_dir": str(back),
+        },
+    ).json()
+    assert r["ok"] and (back / "b.txt").read_bytes() == b"two"
+    assert (
+        client.post("/api/crypt/encrypt", json={"paths": [str(tmp_path / "nope")]}).json()["ok"]
+        is False
+    )
+
+
+def test_dropped_items_are_found_on_disk(demo, tmp_path):
+    client, _, _ = demo
+    (tmp_path / "Desktop" / "proj").mkdir(parents=True)
+    f = tmp_path / "Desktop" / "note.txt"
+    f.write_bytes(b"hello")
+    items = [
+        {"name": "note.txt", "size": 5, "mtime": f.stat().st_mtime * 1000},
+        {"name": "proj", "dir": True},
+        {"name": "note.txt", "size": 999},  # wrong size: not this file
+        {"name": "ghost.txt"},
+    ]
+    r = client.post("/api/crypt/resolve", json={"items": items}).json()
+    assert r["paths"] == [str(f), str(tmp_path / "Desktop" / "proj")]
+    assert r["missing"] == ["note.txt", "ghost.txt"]
+
+
+def test_bound_folder_stays_encrypted(demo, stick, tmp_path):
     client, app, mount = demo
     device, _ = stick
-    assert client.post("/api/usb/enroll", json={"mount": str(mount)}).json()["ok"]
-    assert client.post("/api/box/unlock").json()["ok"]
-    put = client.put("/api/box/file", params={"name": "docs/a.txt"}, content=b"top secret")
-    assert put.json()["ok"]
-    files = client.get("/api/box").json()["files"]
-    assert files == [{"name": "docs/a.txt", "size": 10, "encrypted": False}]
-    assert client.get("/api/box/file", params={"name": "docs/a.txt"}).content == b"top secret"
-
-    app.state.monitor._probe.remove(device)  # pull the drive out
-    app.state.box_check()
-    state = client.get("/api/box").json()
-    assert state["unlocked"] is False and state["files"][0]["encrypted"] is True
-    assert client.get("/api/box/file", params={"name": "docs/a.txt"}).status_code == 403
-
-    app.state.monitor._probe.add(device)  # and back in
-    app.state.box_check()
-    assert client.get("/api/box").json()["unlocked"] is True
-    assert client.get("/api/box/file", params={"name": "docs/a.txt"}).content == b"top secret"
-
-
-def test_file_vault_rejects_path_escape_and_needs_the_drive(demo):
-    client, _, mount = demo
-    assert client.put("/api/box/file", params={"name": "../x"}, content=b"x").status_code == 400
-    assert client.put("/api/box/file", params={"name": "a.txt"}, content=b"x").json()["ok"] is False
+    folder = tmp_path / "bound"
+    folder.mkdir()
+    (folder / "a.txt").write_bytes(b"one")
+    # without an enrolled drive the folder is bound but cannot be encrypted yet
+    r = client.post("/api/bind/add", json={"path": str(folder)}).json()
+    assert r["ok"] and "Not encrypted yet" in r["message"]
     client.post("/api/usb/enroll", json={"mount": str(mount)})
-    assert client.put("/api/box/file", params={"name": "a.txt"}, content=b"x").json()["ok"]
-    assert client.get("/api/box").json()["files"][0]["encrypted"] is True  # box was locked
+    app.state.bind_check()
+    assert client.post("/api/bind/protect", json={"path": str(folder)}).json()["ok"]
+    state = client.get("/api/bind").json()
+    assert state["drive"] and [f["name"] for f in state["folders"][0]["files"]] == ["a.txt.utenc"]
+
+    enc = folder / "a.txt.utenc"
+    assert client.post("/api/bind/open", json={"path": str(enc)}).json()["ok"]
+    assert app.state.launched[-1][-2:] == ["open", str(enc)]
+
+    app.state.monitor._probe.remove(device)  # unplug: the drive's files vanish too
+    shutil.move(str(mount / TOKEN_DIR), str(tmp_path / "unplugged"))
+    app.state.bind_check()
+    assert client.get("/api/bind").json()["drive"] is False
+
+    assert client.post("/api/bind/remove", json={"path": str(folder)}).json()["ok"]
+    assert client.get("/api/bind").json()["folders"] == []
+
+
+def test_manual_mode_leaves_new_files_alone(demo, tmp_path):
+    client, app, mount = demo
+    client.post("/api/usb/enroll", json={"mount": str(mount)})
+    folder = tmp_path / "bound"
+    folder.mkdir()
+    client.post("/api/bind/auto", json={"auto": False})
+    client.post("/api/bind/add", json={"path": str(folder)})
+    (folder / "new.txt").write_bytes(b"x")
+    os.utime(folder / "new.txt", (1, 1))  # old enough for the quiet window
+    app.state.bind_check()
+    assert (folder / "new.txt").exists()
+    client.post("/api/bind/auto", json={"auto": True})
+    app.state.bind_check()
+    assert (folder / "new.txt.utenc").exists() and not (folder / "new.txt").exists()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows registry")
+def test_register_file_association_in_a_scratch_key(demo):
+    client, _, _ = demo
+    try:
+        assert client.post("/api/bind/register").json()["ok"]
+        command = client.get("/api/bind").json()["association"]
+        assert command and command.endswith('open "%1"')
+        assert client.post("/api/bind/unregister").json()["ok"]
+        assert client.get("/api/bind").json()["association"] is None
+    finally:
+        import winreg
+
+        for sub in (TEST_CLASSES, TEST_CLASSES.rsplit("\\", 1)[0]):
+            with contextlib.suppress(OSError):
+                winreg.DeleteKey(winreg.HKEY_CURRENT_USER, sub)

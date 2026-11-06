@@ -10,6 +10,28 @@ All notable changes are documented here. The format follows
 - `usbtether vault lock|unlock|watch <folder>`: AES-256-GCM file vault keyed from the enrolled
   drive (`Agent.derive_key`). `watch` unlocks when the drive is plugged in and locks when it is
   removed. See the module docstring of `usbtether.vault` for the limits.
+- `usbtether open <file.utenc>`: decrypt to a private working copy, open it with its usual
+  program, encrypt every save back, and delete the copy when the drive is removed or the file
+  is idle (`--idle-timeout`). Leftovers from a killed helper are synced back and removed on the
+  next run (`usbtether.opener.sweep`).
+- `usbtether register [--remove]` (Windows): per-user `.utenc` file association so
+  double-clicking an encrypted file runs `usbtether open`.
+- `encrypt_file` / `decrypt_file` take `dest_dir=` and `keep=`.
+- `usbtether app`: a tkinter desktop panel that waits for the drive, keeps bound folders
+  encrypted (auto or manual), runs one-off encrypt/decrypt, and toggles the double-click
+  association and start-at-sign-in. `FolderGuard` holds the logic and is shared with the demo.
+- Windows installer: `packaging\build.ps1` (PyInstaller + Inno Setup) produces
+  `usbtether-setup-<version>.exe`, per user, which registers `.utenc` and optionally starts the
+  panel at sign-in. Uninstalling keeps `%APPDATA%\usbtether`.
+- While the drive is unlocked, presence is checked through its token folder instead of a full
+  probe (the probe takes about 2 s on Windows); `usbtether open` uses the same check.
+- Web demo tabs reorganised: 02 Vault Unlock Lab, **03 Encrypt / Decrypt** (two halves, drag
+  and drop or native file dialog, auto/manual, delete-source toggle, in place or another
+  folder), **04 Bound Folders** (folders kept encrypted, auto/manual encryption of new files,
+  register the double-click association). The earlier "File Vault" auto-lock tab is gone; its
+  engine is still `usbtether vault`.
+- Web demo: the enroll page warns that `--force` makes files encrypted with the old key
+  unrecoverable.
 - Web demo: a **USB Authentication** tab to enroll and verify the drive from the page (CLI
   `enroll`/`verify` equivalents), shown before the Software Guard and Vault experiments.
 

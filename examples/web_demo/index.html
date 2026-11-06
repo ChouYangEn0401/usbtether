@@ -17,6 +17,20 @@ input{background:#080f1c;color:var(--text);border:1px solid var(--line);border-r
 .puzzle{font:22px ui-monospace,Consolas,monospace;color:var(--cyan);background:#071321;border:1px solid #22516a;border-radius:12px;padding:20px;margin:16px 0;text-align:center}
 .vault{border:1px solid #34506a;background:linear-gradient(135deg,#17283c,#101827);border-radius:14px;padding:22px;margin-top:18px;text-align:center}.vault.locked{box-shadow:inset 0 0 35px #f43f5e12}.vault.unlocked{border-color:#278b69;box-shadow:0 0 35px #10b98122}.lockicon{font-size:42px}
 .note{font-size:12px;color:var(--muted);border-left:3px solid #b58b3a;padding:8px 12px;background:#241e13;border-radius:5px;margin-top:16px}
+.duo{display:grid;grid-template-columns:1fr 1fr;gap:16px}.half{border-radius:16px;padding:18px;border:1px solid}
+.half.enc{--acc:#67e8f9;--accbg:#0c2a36;border-color:#1f5466;background:linear-gradient(160deg,#0f2533,#0d1726)}
+.half.dec{--acc:#fcd34d;--accbg:#2e2510;border-color:#5c4a1c;background:linear-gradient(160deg,#272011,#14141a)}
+.halfhead{display:flex;gap:12px;align-items:center;margin-bottom:12px}.halfhead h3{margin:0;color:var(--acc);font-size:18px}.big{font-size:28px}
+.drop{border:2px dashed #3b6a82;border-radius:14px;padding:22px;text-align:center;color:var(--muted);margin-top:12px;transition:.15s}.half .drop{border-color:color-mix(in srgb,var(--acc) 45%,transparent)}
+.drop.over{background:#ffffff0a;border-color:var(--acc,var(--cyan));color:var(--text)}.dropicon{font-size:26px;color:var(--acc,var(--cyan))}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden}.seg button{border:0;border-radius:0;padding:7px 12px;background:transparent;color:var(--muted);font-size:13px}.seg button.on{background:var(--accbg,#123044);color:var(--acc,var(--cyan))}
+.queue{margin-top:10px;max-height:120px;overflow:auto;font:12px ui-monospace,Consolas,monospace;background:#070c15;border:1px solid #24344c;border-radius:10px;padding:8px}.qrow{display:flex;justify-content:space-between;gap:8px;word-break:break-all}.qrow a{color:var(--red);text-decoration:none}
+.switch{display:flex;align-items:center;gap:10px;margin-top:14px;cursor:pointer}.switch input{display:none}.switch span{width:38px;height:22px;border-radius:11px;background:#2a3a52;position:relative;flex:none;transition:.15s}.switch span:after{content:"";position:absolute;left:3px;top:3px;width:16px;height:16px;border-radius:50%;background:#cbd5e1;transition:.15s}.switch input:checked+span{background:var(--acc,var(--cyan))}.switch input:checked+span:after{left:19px;background:#0b1220}
+.opt{display:block;padding:3px 0;cursor:pointer}.opt input{width:auto;margin-right:6px}input.path{width:100%;margin-top:6px}input.path:disabled{opacity:.45}
+button.go{width:100%;margin-top:14px;background:var(--accbg);border-color:var(--acc);color:var(--acc);font-weight:600}.log.mini{height:90px;margin-top:12px}
+.fcard{border:1px solid var(--line);background:var(--panel2);border-radius:12px;padding:14px;margin-bottom:10px}.fcard b{word-break:break-all}.flist{margin-top:10px;max-height:160px;overflow:auto;font:12px/1.7 ui-monospace,Consolas,monospace}.flist a{color:var(--cyan)}
+.stat .seg{margin-top:6px}
+@media(max-width:800px){.duo{grid-template-columns:1fr}}
 @media(max-width:650px){.stats{grid-template-columns:1fr}.panel{padding:16px}.tabs{flex-wrap:wrap}}
 </style>
 </head>
@@ -29,8 +43,9 @@ input{background:#080f1c;color:var(--text);border:1px solid var(--line);border-r
 <div class="tabs">
   <button class="tab active" data-tab="auth">00 &middot; USB Authentication</button>
   <button class="tab" data-tab="guard">01 &middot; Software Guard</button>
-  <button class="tab" data-tab="box">03 &middot; File Vault</button>
   <button class="tab" data-tab="vault">02 &middot; Vault Unlock Lab</button>
+  <button class="tab" data-tab="crypt">03 &middot; Encrypt / Decrypt</button>
+  <button class="tab" data-tab="bind">04 &middot; Bound Folders</button>
 </div>
 
 <section id="auth" class="panel">
@@ -39,7 +54,7 @@ input{background:#080f1c;color:var(--text);border:1px solid var(--line);border-r
   <div id="driveList" class="sub">Looking for USB drives&hellip; (the first scan can take several seconds)</div>
   <div class="row" style="margin:14px 0">
     <label class="sub"><input type="checkbox" id="optRemember" checked style="width:auto"> Protect the key with a secret kept on this computer (<code>--remember</code>)</label>
-    <label class="sub"><input type="checkbox" id="optForce" style="width:auto"> Re-enroll if already enrolled (<code>--force</code>)</label>
+    <label class="sub"><input type="checkbox" id="optForce" style="width:auto"> Re-enroll if already enrolled (<code>--force</code>) <span class="bad">&mdash; WARNING: creates a new key; files already encrypted with the old one can never be decrypted</span></label>
   </div>
   <div class="row">
     <button class="primary" id="enrollBtn" onclick="enrollDrive()">&#9998; Enroll this drive</button>
@@ -66,21 +81,6 @@ input{background:#080f1c;color:var(--text);border:1px solid var(--line);border-r
   <div class="note">Capability scope: resource=demo-workflow, action=execute_step:&lt;n&gt;, 8 s expiry, one use. An ordinary USB drive cannot compute anything itself, so signing happens in this local process: this demonstrates the protocol, it is not hardware security. See docs/threat-model.md.</div>
 </section>
 
-<section id="box" class="panel hidden">
-  <h2>File Vault</h2><p class="desc">Drop files or folders in. While the enrolled USB drive is plugged in they are readable; pull it out and every file is encrypted on disk (AES-256-GCM). Plug it back in to decrypt.</p>
-  <div class="row">
-    <button class="primary" onclick="boxUnlock()">&#128275; Unlock</button>
-    <button onclick="boxLock()">&#128274; Lock</button>
-    <label class="sub"><input type="checkbox" id="boxAuto" checked style="width:auto" onchange="boxSetAuto()"> Lock/unlock automatically when the drive is removed/inserted</label>
-  </div>
-  <div class="vault locked" id="boxState"><div class="lockicon" id="boxIcon">&#9635;</div><h2 id="boxTitle">LOCKED</h2><p class="sub" id="boxText">&mdash;</p></div>
-  <div id="drop" style="margin-top:16px;border:2px dashed #3b6a82;border-radius:14px;padding:26px;text-align:center;color:var(--muted)">Drag files or a folder here, or <button onclick="document.getElementById('pick').click()">choose files</button><input type="file" id="pick" multiple hidden></div>
-  <div class="sub" style="margin:14px 0 6px">FILES IN THE VAULT <span id="boxFolder"></span></div>
-  <div id="boxFiles" class="log" style="height:170px">(empty)</div>
-  <div class="sub" style="margin-top:14px">EVENT TRACE</div><div class="log" id="boxLog" style="height:120px">[SYSTEM] Enroll a drive first, then drop a file.</div>
-  <div class="note">Folders are not zipped: each file is encrypted separately in place (name.ext &rarr; name.ext.utenc), so the folder structure stays. While unlocked the files are ordinary files; anything running as you can read them. The key is derived from the drive's token, so a copy of the token opens the vault; add a passphrase for a second factor.</div>
-</section>
-
 <section id="vault" class="panel hidden">
   <h2>Vault Unlock Lab</h2><p class="desc">A fictional vault. Solve the puzzle, or use the USB override: a challenge-response bound to this one vault challenge.</p>
   <div class="row"><button class="primary" onclick="newPuzzle()">+ Generate challenge</button><span class="sub" id="vExpiry">No challenge yet</span></div>
@@ -94,11 +94,36 @@ input{background:#080f1c;color:var(--text);border:1px solid var(--line);border-r
   <div class="sub" style="margin-top:14px">EVENT TRACE</div><div class="log" id="vaultLog">[SYSTEM] Generate a challenge to begin.</div>
   <div class="note">This only locks fictional content inside this page. It never touches your operating system or files.</div>
 </section>
+
+<section id="crypt" class="panel hidden">
+  <h2>Encrypt / Decrypt</h2><p class="desc">One-off jobs for any file or folder on this computer, using the enrolled drive's key (AES-256-GCM). Drop things on a side, or pick them with the buttons. <b>Auto</b> runs as soon as you drop; <b>Manual</b> collects them until you press the button.</p>
+  <div class="duo">
+    <div class="half enc" id="encHalf"></div>
+    <div class="half dec" id="decHalf"></div>
+  </div>
+  <div class="note">Dropped items: a browser never tells the page where a file lives, so the demo looks for it by name, size and date under Desktop, Downloads, Documents, Pictures, Videos, Music (and OneDrive). If it cannot be found, use the Files&hellip;/Folder&hellip; buttons, which open a normal Windows file dialog. Folders keep their structure; each file becomes <code>name.ext.utenc</code>.</div>
+</section>
+
+<section id="bind" class="panel hidden">
+  <h2>Bound Folders</h2><p class="desc">Folders that are <b>always encrypted on disk</b>. With the drive plugged in, double-click any <code>.utenc</code> file in Explorer: it is decrypted to a private working copy and opened in its usual program; every save is encrypted back over the <code>.utenc</code>. Pull the drive out and the working copy is deleted and nothing opens.</p>
+  <div class="stats">
+    <div class="stat"><small>DRIVE</small><strong id="bDrive">&mdash;</strong></div>
+    <div class="stat"><small>DOUBLE-CLICK TO OPEN (.utenc)</small><strong id="bAssoc">&mdash;</strong><div class="row" style="margin-top:8px"><button id="bAssocBtn" onclick="bAssocToggle()">Register</button></div></div>
+    <div class="stat"><small>NEW PLAIN FILES IN BOUND FOLDERS</small>
+      <div class="seg" id="bMode"><button data-v="auto" class="on">Auto</button><button data-v="manual">Manual</button></div>
+      <div class="sub" id="bModeText" style="margin-top:6px"></div></div>
+  </div>
+  <div class="drop bindrop" id="bDrop"><div class="dropicon">&#128193;</div><div>Drop a folder here to bind it</div><div class="row" style="justify-content:center;margin-top:10px"><button onclick="bPick()">Choose folder&hellip;</button></div></div>
+  <div id="bFolders" style="margin-top:16px"></div>
+  <div class="sub" style="margin-top:14px">EVENT TRACE</div><div class="log" id="bLog" style="height:110px">[SYSTEM] Bind a folder, then register double-click to open.</div>
+  <div class="note">Registration is per user (<code>HKCU\Software\Classes\.utenc</code>, no admin) and runs <code>usbtether open "%1"</code>; <b>Remove</b> undoes it. Binding only encrypts the folder's files: nothing is deleted except the plain originals, after the encrypted copy is written. While a file is open its plain copy sits in <code>%APPDATA%\usbtether\open</code>; if the helper is killed, the next open (or this page) syncs unsaved changes back and deletes it. Editors such as Notepad keep no lock, so "closed" cannot be seen: the copy goes when the drive is pulled out or after 30 minutes without a save. Auto mode needs this demo page's server running.</div>
+</section>
+
 </main>
 <script>
 let guardRun=0, selMount=null, statusBusy=false, guardTimer=null, guardSession=null, guardStep=0, guardTotal=12, vaultChallenge=null;
 const $=id=>document.getElementById(id);
-function log(id,msg,cls=''){const el=$(id);const s=document.createElement('span');s.className=cls;s.textContent=`[${new Date().toLocaleTimeString()}] ${msg}\n`;el.appendChild(s);el.scrollTop=el.scrollHeight;}
+function log(id,msg,cls=''){const el=$(id);if(el.textContent&&!el.textContent.endsWith('\n'))el.appendChild(document.createTextNode('\n'));const s=document.createElement('span');s.className=cls;s.textContent=`[${new Date().toLocaleTimeString()}] ${msg}\n`;el.appendChild(s);el.scrollTop=el.scrollHeight;}
 async function api(path,data){const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data||{})});const j=await r.json();if(!r.ok)throw new Error(j.detail||'Request failed');return j;}
 async function refreshUsb(){
   if(statusBusy)return;statusBusy=true;
@@ -156,7 +181,9 @@ async function verifyDrive(){
   }catch(e){log('authLog',e.message,'bad');}
   $('verifyBtn').disabled=false;
 }
-document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x===b));document.querySelectorAll('section.panel').forEach(x=>x.classList.toggle('hidden',x.id!==b.dataset.tab));}));
+function showTab(id){const b=document.querySelector(`.tab[data-tab="${id}"]`);if(!b)return;document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x===b));document.querySelectorAll('section.panel').forEach(x=>x.classList.toggle('hidden',x.id!==id));}
+document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{showTab(b.dataset.tab);history.replaceState(null,'','#'+b.dataset.tab);}));
+if(location.hash)showTab(location.hash.slice(1));
 async function startGuard(){
   stopGuard();$('startBtn').disabled=true;const run=++guardRun;
   try{
@@ -193,60 +220,122 @@ function setVault(ok){$('vaultBox').className='vault '+(ok?'unlocked':'locked');
 async function solvePuzzle(){if(!vaultChallenge){log('vaultLog','Generate a challenge first.','warn');return;}try{const r=await api('/api/vault/solve',{challenge_id:vaultChallenge,answer:Number($('answer').value)});log('vaultLog',r.message,r.unlocked?'good':'bad');if(r.unlocked){setVault(true);vaultChallenge=null;}}catch(e){log('vaultLog',e.message,'bad');}}
 async function unlockWithUsb(){if(!vaultChallenge){log('vaultLog','Generate a fresh challenge first.','warn');return;}try{const r=await api('/api/vault/usb',{challenge_id:vaultChallenge});log('vaultLog',r.message,r.unlocked?'good':'bad');if(r.unlocked){setVault(true);vaultChallenge=null;}}catch(e){log('vaultLog',e.message,'bad');}}
 refreshUsb();setInterval(refreshUsb,6000);
-let boxPoll=null;
-function fmt(n){return n<1024?n+' B':n<1048576?(n/1024).toFixed(1)+' KB':(n/1048576).toFixed(1)+' MB';}
-async function refreshBox(){
+// ---- shared: turn dropped items into real paths -----------------------------------------
+async function dropToPaths(e,logId,onlyDirs){
+  const items=[];
+  for(const it of [...e.dataTransfer.items]){
+    const en=it.webkitGetAsEntry&&it.webkitGetAsEntry();if(!en)continue;
+    if(en.isDirectory)items.push({name:en.name,dir:true});
+    else if(!onlyDirs){const f=it.getAsFile();if(f)items.push({name:f.name,size:f.size,mtime:f.lastModified});}
+  }
+  if(!items.length){log(logId,onlyDirs?'Drop a folder, not a file.':'Nothing usable was dropped.','warn');return [];}
+  log(logId,'Locating '+items.length+' dropped item(s) on disk…','cyan');
+  const r=await api('/api/crypt/resolve',{items});
+  r.missing.forEach(n=>log(logId,'Could not find "'+n+'" on disk. Use the button to pick it instead.','warn'));
+  return r.paths;
+}
+function wireDrop(el,handler){
+  ['dragenter','dragover'].forEach(ev=>el.addEventListener(ev,e=>{e.preventDefault();el.classList.add('over');}));
+  ['dragleave','drop'].forEach(ev=>el.addEventListener(ev,e=>{e.preventDefault();el.classList.remove('over');}));
+  el.addEventListener('drop',e=>{handler(e).catch(err=>console.error(err));});
+}
+function seg(el,onChange){el.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{el.querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));onChange(b.dataset.v);}));}
+
+// ---- 03 Encrypt / Decrypt -------------------------------------------------------------
+const halves={};
+function buildHalf(k){
+  const enc=k==='enc', h=$(k+'Half');
+  h.innerHTML=`
+    <div class="halfhead"><span class="big">${enc?'&#128274;':'&#128275;'}</span><div><h3>${enc?'Encrypt':'Decrypt'}</h3><div class="sub">${enc?'any file or folder &rarr; .utenc':'.utenc files or a folder of them &rarr; originals'}</div></div></div>
+    <div class="seg" id="${k}Mode"><button data-v="auto" class="on">Auto &middot; run on drop</button><button data-v="manual">Manual &middot; press to run</button></div>
+    <div class="drop" id="${k}Drop"><div class="dropicon">${enc?'&#11015;':'&#11015;'}</div><div>Drop ${enc?'files or folders':'.utenc files or folders'} here</div>
+      <div class="row" style="justify-content:center;margin-top:10px"><button onclick="hPick('${k}','${enc?'files':'encrypted'}')">Files&hellip;</button><button onclick="hPick('${k}','folder')">Folder&hellip;</button></div></div>
+    <div class="queue" id="${k}Queue"></div>
+    <label class="switch"><input type="checkbox" id="${k}Delete" checked><span></span>${enc?'Delete the original after encrypting':'Delete the .utenc after decrypting'}</label>
+    <div class="sub" style="margin:12px 0 4px">SAVE TO</div>
+    <label class="opt"><input type="radio" name="${k}Dest" value="inplace" checked> Back where it was</label>
+    <label class="opt"><input type="radio" name="${k}Dest" value="custom"> Another folder</label>
+    <input class="path" id="${k}Dir" disabled>
+    <button class="go" id="${k}Btn" onclick="hRun('${k}')">${enc?'Encrypt':'Decrypt'}</button>
+    <div class="log mini" id="${k}Log">[SYSTEM] ${enc?'Drop something to encrypt.':'Drop .utenc files to decrypt.'}</div>`;
+  halves[k]={auto:true,queue:[]};
+  seg($(k+'Mode'),v=>{halves[k].auto=(v==='auto');hRender(k);});
+  h.querySelectorAll(`input[name=${k}Dest]`).forEach(r=>r.addEventListener('change',()=>{$(k+'Dir').disabled=(r.value==='inplace'&&r.checked);}));
+  wireDrop($(k+'Drop'),async e=>hAdd(k,await dropToPaths(e,k+'Log',false)));
+  hRender(k);
+}
+function hRender(k){
+  const s=halves[k],q=$(k+'Queue');q.textContent='';
+  s.queue.forEach((p,i)=>{const d=document.createElement('div');d.className='qrow';d.textContent=p;const x=document.createElement('a');x.href='#';x.textContent='×';x.onclick=ev=>{ev.preventDefault();s.queue.splice(i,1);hRender(k);};d.appendChild(x);q.appendChild(d);});
+  q.style.display=s.queue.length?'block':'none';
+  const btn=$(k+'Btn'),verb=k==='enc'?'Encrypt':'Decrypt';
+  btn.textContent=s.queue.length?`${verb} ${s.queue.length} item(s)`:verb;
+  btn.disabled=!s.queue.length;
+  btn.style.display=s.auto&&!s.queue.length?'none':'block';
+}
+async function hAdd(k,paths){
+  const s=halves[k];paths.forEach(p=>{if(!s.queue.includes(p))s.queue.push(p);});hRender(k);
+  if(s.auto&&s.queue.length)await hRun(k);
+}
+async function hPick(k,kind){
+  try{const r=await api('/api/crypt/pick',{kind});if(!r.ok){log(k+'Log',r.message,'bad');return;}await hAdd(k,r.paths);}
+  catch(e){log(k+'Log',e.message,'bad');}
+}
+async function hRun(k){
+  const s=halves[k];if(!s.queue.length)return;
+  const dest=document.querySelector(`input[name=${k}Dest]:checked`).value;
+  $(k+'Btn').disabled=true;
   try{
-    const r=await fetch('/api/box').then(x=>x.json());
-    $('boxState').className='vault '+(r.unlocked?'unlocked':'locked');
-    $('boxIcon').textContent=r.unlocked?'\u25a3 \u2713':'\u25a3';
-    $('boxTitle').textContent=r.unlocked?'UNLOCKED':'LOCKED';
-    $('boxText').textContent=r.note||(r.unlocked?'Drive present: files are readable.':'Files are encrypted on disk.');
-    $('boxFolder').textContent='\u00b7 '+r.folder;
-    if(document.activeElement!==$('boxAuto'))$('boxAuto').checked=r.auto;
-    const box=$('boxFiles');box.textContent='';
-    if(!r.files.length){box.textContent='(empty)';return;}
-    r.files.forEach(f=>{
+    const r=await api('/api/crypt/'+(k==='enc'?'encrypt':'decrypt'),{paths:s.queue,delete_source:$(k+'Delete').checked,dest,dest_dir:$(k+'Dir').value});
+    log(k+'Log',r.message,r.ok?'good':'bad');
+    if(r.ok){(r.outputs||[]).slice(0,15).forEach(o=>log(k+'Log','  → '+o,'cyan'));s.queue=[];}
+  }catch(e){log(k+'Log',e.message,'bad');}
+  hRender(k);
+}
+buildHalf('enc');buildHalf('dec');
+fetch('/api/crypt/info').then(x=>x.json()).then(i=>{$('encDir').value=i.default_dest;$('decDir').value=i.default_dest.replace(/encrypted$/,'decrypted');});
+
+// ---- 04 Bound folders ----------------------------------------------------------------
+let bLast='',bNote='',bAssocOn=false;
+function bModeText(auto){$('bModeText').textContent=auto?'Encrypted within a few seconds of being saved or dropped in.':'Left alone until you press "Encrypt now" on the folder.';}
+seg($('bMode'),async v=>{await api('/api/bind/auto',{auto:v==='auto'});bModeText(v==='auto');refreshBind();});
+async function refreshBind(){
+  let r;try{r=await fetch('/api/bind').then(x=>x.json());}catch(e){return;}
+  const key=JSON.stringify(r);if(key===bLast)return;bLast=key;
+  if(r.note&&r.note!==bNote){bNote=r.note;log('bLog',r.note,'cyan');}
+  $('bDrive').innerHTML=r.drive?'<span class="good">present &middot; files open</span>':'<span class="bad">locked &middot; plug in the enrolled drive</span>';
+  bAssocOn=!!r.association;
+  $('bAssoc').innerHTML=!r.association_supported?'<span class="warn">Windows only</span>':(bAssocOn?'<span class="good">registered</span>':'<span class="warn">not registered</span>');
+  $('bAssocBtn').textContent=bAssocOn?'Remove':'Register';$('bAssocBtn').disabled=!r.association_supported;
+  $('bMode').querySelectorAll('button').forEach(b=>b.classList.toggle('on',(b.dataset.v==='auto')===r.auto));bModeText(r.auto);
+  const box=$('bFolders');box.textContent='';
+  if(!r.folders.length){box.innerHTML='<div class="sub" style="text-align:center">No bound folders yet.</div>';return;}
+  r.folders.forEach(f=>{
+    const plain=f.files.filter(x=>!x.encrypted).length,enc=f.files.length-plain;
+    const card=document.createElement('div');card.className='fcard';
+    const head=document.createElement('div');head.className='row';head.style.justifyContent='space-between';
+    const t=document.createElement('div');t.innerHTML='<b></b><div class="sub"></div>';t.querySelector('b').textContent=f.path;
+    t.querySelector('.sub').innerHTML=f.exists?`<span class="good">${enc} encrypted</span> &middot; <span class="${plain?'warn':'sub'}">${plain} plain</span>`:'<span class="bad">folder missing</span>';
+    const acts=document.createElement('div');acts.className='row';
+    const now=document.createElement('button');now.textContent='🔒 Encrypt now';now.disabled=!plain;now.onclick=async()=>{const x=await api('/api/bind/protect',{path:f.path});log('bLog',x.message,x.ok?'good':'bad');refreshBind();};
+    const un=document.createElement('button');un.className='danger';un.textContent='Unbind';un.onclick=async()=>{const x=await api('/api/bind/remove',{path:f.path});log('bLog',x.message,'warn');refreshBind();};
+    acts.append(now,un);head.append(t,acts);card.appendChild(head);
+    const list=document.createElement('div');list.className='flist';
+    f.files.slice(0,60).forEach(x=>{
       const row=document.createElement('div');
-      const tag=document.createElement('span');tag.className=f.encrypted?'bad':'good';tag.textContent=f.encrypted?'\u25a0 encrypted ':'\u25a1 readable  ';
-      row.appendChild(tag);row.appendChild(document.createTextNode(f.name+'  ('+fmt(f.size)+')  '));
-      if(!f.encrypted){const a=document.createElement('a');a.href='/api/box/file?name='+encodeURIComponent(f.name);a.textContent='download';a.style.color='var(--cyan)';row.appendChild(a);}
-      const d=document.createElement('a');d.href='#';d.textContent=' delete';d.style.color='var(--red)';d.onclick=async e=>{e.preventDefault();await fetch('/api/box/file?name='+encodeURIComponent(f.name),{method:'DELETE'});refreshBox();};
-      row.appendChild(d);box.appendChild(row);
+      const tag=document.createElement('span');tag.className=x.encrypted?'good':'warn';tag.textContent=x.encrypted?'■ ':'□ ';
+      row.append(tag,document.createTextNode(x.name+'  '));
+      if(x.encrypted){const a=document.createElement('a');a.href='#';a.textContent='open';a.onclick=async ev=>{ev.preventDefault();const y=await api('/api/bind/open',{path:x.path});log('bLog',y.message,y.ok?'good':'bad');};row.appendChild(a);}
+      else{const s=document.createElement('span');s.className='sub';s.textContent='plain';row.appendChild(s);}
+      list.appendChild(row);
     });
-  }catch(e){}
-}
-async function boxUnlock(){const r=await api('/api/box/unlock');log('boxLog',r.message,r.ok?'good':'bad');refreshBox();}
-async function boxLock(){const r=await api('/api/box/lock');log('boxLog',r.message,r.ok?'good':'bad');refreshBox();}
-async function boxSetAuto(){await api('/api/box/auto',{auto:$('boxAuto').checked});}
-async function boxPut(file,name){
-  const r=await fetch('/api/box/file?name='+encodeURIComponent(name),{method:'PUT',body:file});
-  const j=await r.json();
-  if(!r.ok){log('boxLog',(j.detail||'Upload failed')+' \u2014 '+name,'bad');return;}
-  log('boxLog',j.message,j.ok?'good':'bad');
-}
-function readEntry(entry,path){
-  return new Promise(resolve=>{
-    if(entry.isFile){entry.file(f=>boxPut(f,path+entry.name).then(resolve),()=>resolve());}
-    else if(entry.isDirectory){
-      const reader=entry.createReader(),all=[];
-      const next=()=>reader.readEntries(async list=>{
-        if(!list.length){for(const e of all)await readEntry(e,path+entry.name+'/');resolve();return;}
-        all.push(...list);next();
-      },()=>resolve());
-      next();
-    }else resolve();
+    if(!f.files.length)list.textContent='(empty)';
+    card.appendChild(list);box.appendChild(card);
   });
 }
-const drop=$('drop');
-['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.style.borderColor='var(--cyan)';}));
-['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.style.borderColor='#3b6a82';}));
-drop.addEventListener('drop',async e=>{
-  const items=[...e.dataTransfer.items].map(i=>i.webkitGetAsEntry&&i.webkitGetAsEntry()).filter(Boolean);
-  for(const en of items)await readEntry(en,'');
-  refreshBox();
-});
-$('pick').addEventListener('change',async e=>{for(const f of e.target.files)await boxPut(f,f.name);e.target.value='';refreshBox();});
-refreshBox();setInterval(refreshBox,2000);
-
+async function bAdd(paths){for(const p of paths){const x=await api('/api/bind/add',{path:p});log('bLog',x.message,x.ok?'good':'bad');}refreshBind();}
+async function bPick(){try{const r=await api('/api/crypt/pick',{kind:'folder'});if(!r.ok){log('bLog',r.message,'bad');return;}await bAdd(r.paths);}catch(e){log('bLog',e.message,'bad');}}
+async function bAssocToggle(){const x=await api(bAssocOn?'/api/bind/unregister':'/api/bind/register');log('bLog',x.message,x.ok?'good':'bad');bLast='';refreshBind();}
+wireDrop($('bDrop'),async e=>bAdd(await dropToPaths(e,'bLog',true)));
+refreshBind();setInterval(refreshBind,2000);
 </script></body></html>
