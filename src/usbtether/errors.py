@@ -49,3 +49,7 @@ class AuthorizationError(UsbTetherError):
 
 class TokenLockedError(TokenError):
     """The private key is passphrase-protected and no (or a wrong) passphrase was supplied."""
+
+
+class AmbiguousDeviceError(UsbTetherError):
+    """More than one enrolled drive is present and none was selected."""

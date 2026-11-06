@@ -162,3 +162,13 @@ def load_private_key(token: Token, passphrase: bytes | None = None) -> Ed25519Pr
     if public != token.public_key:
         raise TokenError("private key does not match the public key in token.json")
     return key
+
+
+def remove_token(mount: str | Path) -> None:
+    """Delete the token files (best effort). Used to roll back a failed enrollment."""
+    directory = token_directory(mount)
+    for name in (TOKEN_FILE, KEY_FILE, TOKEN_FILE + ".tmp", KEY_FILE + ".tmp"):
+        with contextlib.suppress(OSError):
+            (directory / name).unlink(missing_ok=True)
+    with contextlib.suppress(OSError):
+        directory.rmdir()
