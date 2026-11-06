@@ -80,7 +80,7 @@ input{background:#080f1c;color:var(--text);border:1px solid var(--line);border-r
 </section>
 </main>
 <script>
-let selMount=null, statusBusy=false, guardTimer=null, guardSession=null, guardStep=0, guardTotal=12, vaultChallenge=null;
+let guardRun=0, selMount=null, statusBusy=false, guardTimer=null, guardSession=null, guardStep=0, guardTotal=12, vaultChallenge=null;
 const $=id=>document.getElementById(id);
 function log(id,msg,cls=''){const el=$(id);const s=document.createElement('span');s.className=cls;s.textContent=`[${new Date().toLocaleTimeString()}] ${msg}\n`;el.appendChild(s);el.scrollTop=el.scrollHeight;}
 async function api(path,data){const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data||{})});const j=await r.json();if(!r.ok)throw new Error(j.detail||'Request failed');return j;}
@@ -142,31 +142,35 @@ async function verifyDrive(){
 }
 document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x===b));document.querySelectorAll('section.panel').forEach(x=>x.classList.toggle('hidden',x.id!==b.dataset.tab));}));
 async function startGuard(){
-  stopGuard();
+  stopGuard();$('startBtn').disabled=true;const run=++guardRun;
   try{
     const s=await api('/api/guard/start',{total_steps:guardTotal});
-    if(!s.started){log('guardLog',s.reason,s.fatal?'bad':'warn');return;}
+    if(run!==guardRun)return;
+    if(!s.started){log('guardLog',s.reason,s.fatal?'bad':'warn');$('startBtn').disabled=false;return;}
     guardSession=s.session_id;guardStep=1;$('gProgress').textContent='0 / '+guardTotal;$('gDrive').textContent=s.drive;
-    $('startBtn').disabled=true;$('stopBtn').disabled=false;
-    log('guardLog','Session opened after USB challenge-response \u00b7 '+guardSession.slice(0,8),'cyan');guardTick();
-  }catch(e){log('guardLog',e.message,'bad');}
+    $('stopBtn').disabled=false;
+    log('guardLog','Session opened after USB challenge-response \u00b7 '+guardSession.slice(0,8),'cyan');guardTick(run);
+  }catch(e){log('guardLog',e.message,'bad');$('startBtn').disabled=false;}
 }
-function stopGuard(){if(guardTimer){clearTimeout(guardTimer);guardTimer=null;}$('stopBtn').disabled=true;$('startBtn').disabled=false;}
-async function guardTick(){
+function stopGuard(){guardRun++;if(guardTimer){clearTimeout(guardTimer);guardTimer=null;}$('stopBtn').disabled=true;$('startBtn').disabled=false;}
+async function guardTick(run){
+  if(run!==guardRun)return;
   if(!guardSession||guardStep>guardTotal){log('guardLog','Workflow completed.','good');stopGuard();return;}
   log('guardLog',`Step ${guardStep}: requesting scoped capability\u2026`,'cyan');
   try{
     const a=await api('/api/guard/authorize',{session_id:guardSession,step:guardStep});
+    if(run!==guardRun)return;
     if(!a.authorized){
       if(a.fatal){log('guardLog','Stopped: '+a.reason,'bad');stopGuard();refreshUsb();return;}
-      log('guardLog',a.reason+' Retry in 2.5 s.','warn');guardTimer=setTimeout(guardTick,a.retry_after_ms);return;
+      log('guardLog',a.reason+' Retry in 2.5 s.','warn');guardTimer=setTimeout(()=>guardTick(run),a.retry_after_ms);return;
     }
     log('guardLog',`USB proof accepted. Capability issued (${a.signature_preview})`,'good');
     const c=await api('/api/guard/consume',{session_id:guardSession,step:guardStep,capability:a.capability});
+    if(run!==guardRun)return;
     $('gProgress').textContent=guardStep+' / '+guardTotal;
     log('guardLog',`Capability consumed exactly once. Step ${guardStep} executed; ${c.remaining_steps} remaining.`,'good');
-    guardStep++;guardTimer=setTimeout(guardTick,900);
-  }catch(e){log('guardLog','ERROR: '+e.message,'bad');guardTimer=setTimeout(guardTick,2500);}
+    guardStep++;guardTimer=setTimeout(()=>guardTick(run),900);
+  }catch(e){log('guardLog','ERROR: '+e.message,'bad');guardTimer=setTimeout(()=>guardTick(run),2500);}
 }
 async function newPuzzle(){try{const c=await api('/api/vault/new');vaultChallenge=c.challenge_id;$('puzzle').textContent=c.question;$('vExpiry').textContent='Challenge valid for '+c.expires_in_seconds+' seconds';$('answer').value='';setVault(false);log('vaultLog','New one-time challenge generated. ID '+c.challenge_id.slice(0,8),'cyan');}catch(e){log('vaultLog',e.message,'bad');}}
 function setVault(ok){$('vaultBox').className='vault '+(ok?'unlocked':'locked');$('lockIcon').textContent=ok?'\u25a3 \u2713':'\u25a3';$('vaultTitle').textContent=ok?'VAULT UNLOCKED':'VAULT LOCKED';$('vaultText').textContent=ok?'Demo payload: \u201cThe secret is not the key; it is the authority to use it.\u201d':'Protected demo payload is unavailable.';}
