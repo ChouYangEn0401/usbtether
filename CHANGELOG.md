@@ -7,6 +7,9 @@ All notable changes are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- `usbtether vault lock|unlock|watch <folder>`: AES-256-GCM file vault keyed from the enrolled
+  drive (`Agent.derive_key`). `watch` unlocks when the drive is plugged in and locks when it is
+  removed. See the module docstring of `usbtether.vault` for the limits.
 - Web demo: a **USB Authentication** tab to enroll and verify the drive from the page (CLI
   `enroll`/`verify` equivalents), shown before the Software Guard and Vault experiments.
 

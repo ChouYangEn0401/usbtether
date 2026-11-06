@@ -18,6 +18,7 @@ from .errors import ProbeError, UsbTetherError
 from .probe import DeviceProbe, default_probe
 from .registry import Registry
 from .secretstore import HostSecretStore, default_secret_store
+from .vault import VaultWatcher, drive_key, lock_folder, unlock_folder
 from .verifier import Verifier
 
 EXIT_OK, EXIT_FAILED, EXIT_PLATFORM = 0, 1, 3
@@ -154,6 +155,30 @@ def _cmd_revoke(args: argparse.Namespace, _: Callable[[], DeviceProbe], reg: Reg
     return EXIT_OK
 
 
+def _cmd_vault(args: argparse.Namespace, probe: Callable[[], DeviceProbe], reg: Registry) -> int:
+    folder = Path(args.folder)
+    if not folder.is_dir():
+        raise UsbTetherError(f"{folder} is not a folder")
+    agent = Agent(
+        probe(),
+        passphrase=lambda: _prompt_passphrase(confirm=False),
+        secret_store=_store(args),
+    )
+    verifier = Verifier(reg)
+    if args.action == "watch":
+        print(f"Watching {folder}: plug the drive in to unlock, pull it out to lock. Ctrl+C stops.")
+        VaultWatcher(folder, agent, verifier, on_event=print).run(args.interval)
+        return EXIT_OK
+    key = drive_key(agent, verifier)
+    if args.action == "lock":
+        result = lock_folder(folder, key)
+        print(f"Locked {result.changed} file(s); {result.skipped} already locked.")
+    else:
+        result = unlock_folder(folder, key)
+        print(f"Unlocked {result.changed} file(s); {result.skipped} already plain.")
+    return EXIT_OK
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="usbtether",
@@ -191,6 +216,12 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("verify", help="run a challenge-response against a plugged-in token")
     p.add_argument("mount", nargs="?", help="drive to use (default: the only enrolled drive)")
     p.set_defaults(func=_cmd_verify)
+
+    p = sub.add_parser("vault", help="encrypt/decrypt a folder with the key of a plugged-in drive")
+    p.add_argument("action", choices=["lock", "unlock", "watch"])
+    p.add_argument("folder")
+    p.add_argument("--interval", type=float, default=1.0, help="watch: seconds between checks")
+    p.set_defaults(func=_cmd_vault)
 
     p = sub.add_parser("list", help="show tokens registered on this host")
     p.set_defaults(func=_cmd_list)

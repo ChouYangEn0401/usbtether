@@ -125,3 +125,27 @@ class Agent:
             device=report,
             signature=b64url_encode(key.sign(payload)),
         )
+
+    def derive_key(self, label: str, mount: str | os.PathLike[str] | None = None) -> bytes:
+        """Derive a 32-byte secret from the token's private key (needs the drive plugged in).
+
+        Ed25519 signatures are deterministic, so signing a fixed label gives the same bytes every
+        time, and only whoever can use the private key can reproduce them. The result is hashed
+        down with HKDF; use a different ``label`` for every purpose.
+        """
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
+        selected = self._select(mount)
+        if not selected.device.is_bindable:
+            raise UnsupportedDeviceError(
+                f"drive reports no usable serial ({selected.device.serial_quality.value})"
+            )
+        secret = (
+            self._unlock_secret(selected.token.token_id) if selected.token.key_encrypted else None
+        )
+        key = load_private_key(selected.token, secret)
+        signature = key.sign(b"usbtether-derive-v1\0" + label.encode("utf-8"))
+        return HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=b"usbtether-key").derive(
+            signature
+        )
