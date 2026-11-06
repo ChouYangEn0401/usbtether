@@ -156,6 +156,11 @@ opens. `usbtether register --remove` undoes the registration (it only touches
 | Situation | What happens |
 |---|---|
 | Editor keeps the file locked (Word, Excel) | working copy stays until the drive is pulled or you close it and 30 min pass without a save |
+| You pull the drive (or eject it) while the file is open | the copy is deleted at once if nothing holds it; if a program does, a message asks you to close it, saves made meanwhile are still encrypted back (the key stays in memory only for that), and the copy is deleted the moment it is closed |
+| You rename or move the folder while a file is open | the next save goes to the file's new place: it is found by name and its exact encrypted bytes near the old place or in a bound folder. The old folder is never recreated |
+| The `.utenc` was deleted or moved far away while open | the save is not lost: it is written, still encrypted, to `%APPDATA%\usbtether\recovered\<time>\` |
+| You rename a bound folder | the panel follows it (folders are tracked by their file id) and keeps protecting it |
+| Ejecting says the drive is in use | the helper and the panel work from `%APPDATA%\usbtether`, never from the drive; another program has a file on the drive open |
 | Editor keeps no lock (Notepad) | same; "closed" cannot be detected, so the 30 min idle rule applies (`--idle-timeout` to change) |
 | The helper is killed | the next `usbtether open` (or the web demo) syncs unsaved changes back and deletes the leftover |
 | You re-enroll with `--force` | **files encrypted with the old key can never be opened again** (the key comes from the token) |

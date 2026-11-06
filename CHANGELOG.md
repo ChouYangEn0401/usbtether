@@ -23,6 +23,15 @@ All notable changes are documented here. The format follows
 - Windows installer: `packaging\build.ps1` (PyInstaller + Inno Setup) produces
   `usbtether-setup-<version>.exe`, per user, which registers `.utenc` and optionally starts the
   panel at sign-in. Uninstalling keeps `%APPDATA%\usbtether`.
+- No plain leftovers when the drive is pulled while a file is open: if a program still holds
+  the working copy, `usbtether open` warns once, keeps encrypting its saves back, and deletes the
+  copy when it is closed. A held copy keeps its sync state so `sweep` can finish the job if the
+  helper is killed (previously the state was deleted and later edits could be lost).
+- Renaming or moving the folder of an open file: saves follow the file (found by name and its
+  encrypted bytes) instead of recreating the old folder; if it is gone, the save goes to
+  `%APPDATA%\usbtether\recovered`. Bound folders follow renames via their file id.
+- `usbtether open` and `usbtether app` switch to the state folder so they never keep the USB
+  drive busy (Explorer starts them in the clicked file's folder).
 - While the drive is unlocked, presence is checked through its token folder instead of a full
   probe (the probe takes about 2 s on Windows); `usbtether open` uses the same check.
 - Web demo tabs reorganised: 02 Vault Unlock Lab, **03 Encrypt / Decrypt** (two halves, drag
