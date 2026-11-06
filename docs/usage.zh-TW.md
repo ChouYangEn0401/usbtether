@@ -80,11 +80,12 @@ probe = default_probe()
 authorizer = Authorizer(Verifier(Registry.default()))
 agent = Agent(probe)
 
-session = authorizer.open_session_local(agent)       # 開始時驗證一次
-with PresenceMonitor(probe, authorizer):             # 拔除就撤銷 session
-    cap = authorizer.issue_capability_local(         # 針對這個操作的全新 challenge
-        agent, session.session_id, resource="database", action="write")
-    authorizer.consume(cap, resource="database", action="write")   # 僅能使用一次
+session = authorizer.open_session_local(agent)  # 開始時驗證一次
+with PresenceMonitor(probe, authorizer):  # 拔除就撤銷 session
+    cap = authorizer.issue_capability_local(  # 針對這個操作的全新 challenge
+        agent, session.session_id, resource="database", action="write"
+    )
+    authorizer.consume(cap, resource="database", action="write")  # 僅能使用一次
     do_the_sensitive_thing()
 ```
 

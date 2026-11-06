@@ -93,11 +93,12 @@ probe = default_probe()
 authorizer = Authorizer(Verifier(Registry.default()))
 agent = Agent(probe)
 
-session = authorizer.open_session_local(agent)       # authenticate once, at the start
-with PresenceMonitor(probe, authorizer):             # unplugging revokes the session
-    cap = authorizer.issue_capability_local(         # fresh challenge for this operation
-        agent, session.session_id, resource="database", action="write")
-    authorizer.consume(cap, resource="database", action="write")   # single use
+session = authorizer.open_session_local(agent)  # authenticate once, at the start
+with PresenceMonitor(probe, authorizer):  # unplugging revokes the session
+    cap = authorizer.issue_capability_local(  # fresh challenge for this operation
+        agent, session.session_id, resource="database", action="write"
+    )
+    authorizer.consume(cap, resource="database", action="write")  # single use
     do_the_sensitive_thing()
 ```
 
