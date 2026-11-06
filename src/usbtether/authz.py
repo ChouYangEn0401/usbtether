@@ -67,7 +67,8 @@ class Capability:
             "session_id": self.session_id,
             "resource": self.resource,
             "action": self.action,
-            "expires_at": self.expires_at,
+            # Integer milliseconds: signed payloads must not contain floats.
+            "expires_at_ms": round(self.expires_at * 1000),
             "max_uses": self.max_uses,
         }
 
@@ -82,7 +83,7 @@ class Capability:
                 session_id=str(data["session_id"]),
                 resource=str(data["resource"]),
                 action=str(data["action"]),
-                expires_at=float(data["expires_at"]),
+                expires_at=int(data["expires_at_ms"]) / 1000,
                 max_uses=int(data["max_uses"]),
                 signature=str(data["signature"]),
             )
@@ -185,7 +186,7 @@ class Authorizer:
             session_id=session.session_id,
             resource=pending.resource,
             action=pending.action,
-            expires_at=self.clock() + self.capability_ttl,
+            expires_at=round((self.clock() + self.capability_ttl) * 1000) / 1000,
             max_uses=1,
             signature="",
         )

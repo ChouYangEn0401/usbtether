@@ -223,3 +223,13 @@ def test_background_thread_revokes_on_removal(env, probe):
         ):
             time.sleep(0.01)
     assert authorizer.get_session(session.session_id).revoked_reason == "device_removed"
+
+
+def test_signed_capability_payload_has_no_floats(env):
+    authorizer, agent, _, mount = env
+    session = authorizer.open_session_local(agent, mount)
+    cap = authorizer.issue_capability_local(agent, session.session_id, "db", "read", mount)
+    payload = cap.payload()
+    assert all(not isinstance(v, float) for v in payload.values())
+    assert isinstance(payload["expires_at_ms"], int)
+    assert Capability.from_dict(cap.to_dict()) == cap

@@ -176,11 +176,12 @@ refuses to sign an already expired challenge, and refuses drives that are not bi
 
 ```json
 { "capability_id": "...", "session_id": "...", "resource": "db", "action": "write",
-  "expires_at": 1762419008.5, "max_uses": 1, "signature": "<hex HMAC-SHA256>" }
+  "expires_at_ms": 1762419008500, "max_uses": 1, "signature": "<hex HMAC-SHA256>" }
 ```
 
-`signature = HMAC-SHA256(authorizer_key, canonical_json(all fields except signature))`. The key
-is random per `Authorizer` instance and never leaves memory.
+`signature = HMAC-SHA256(authorizer_key, canonical_json(all fields except signature))`. Expiry is an
+integer number of milliseconds so that the signed bytes contain no floats. The key is random per
+`Authorizer` instance and never leaves memory.
 
 `consume(capability, resource, action)` fails with one of: `unknown_capability`,
 `bad_signature`, `scope_mismatch`, `capability_expired`, `capability_used`,
