@@ -23,6 +23,7 @@ First public version.
 - Sessions, single-use HMAC-signed capabilities and a polling presence monitor.
 - `usbtether` CLI: `devices`, `enroll`, `verify`, `list`, `revoke`.
 - Web demo (Software Guard, Vault Unlock Lab) and an SDK quickstart.
+- `requirements*.txt` files that delegate to `pyproject.toml`.
 - Protocol specification, threat model, device-identity notes and architecture overview.
 
 ### Known limitations

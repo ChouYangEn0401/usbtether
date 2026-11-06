@@ -1,0 +1,2 @@
+# Library + CLI + web demo (fastapi, uvicorn). See examples/web_demo/README.md.
+-e .[demo]

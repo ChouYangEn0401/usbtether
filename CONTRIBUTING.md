@@ -9,7 +9,7 @@ claims, tested behaviour, no overstated security.**
 git clone <your fork>
 cd usbtether
 python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
-pip install -e ".[dev]"
+pip install -e ".[dev]"      # or: pip install -r requirements-dev.txt
 ```
 
 ## Checks (CI runs the same)

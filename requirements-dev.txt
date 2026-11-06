@@ -1,0 +1,2 @@
+# Everything needed to develop: tests, lint, type checking, web demo.
+-e .[dev]

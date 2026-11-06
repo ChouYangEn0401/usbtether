@@ -36,6 +36,9 @@ pip install ".[demo]"    # 另加 Web demo 所需套件
 pip install -e ".[dev]"  # 開發環境
 ```
 
+習慣用 requirements 檔也可以，它們只是指向 `pyproject.toml`（唯一的依賴來源）：
+`pip install -r requirements.txt`（函式庫）、`requirements-demo.txt`（加 Web demo）、`requirements-dev.txt`（開發）。
+
 ## 快速開始（CLI）
 
 ```console

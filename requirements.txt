@@ -1,0 +1,3 @@
+# Runtime dependencies. The single source of truth is pyproject.toml;
+# this file only installs the package from this checkout (library + CLI).
+-e .

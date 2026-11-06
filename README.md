@@ -46,6 +46,10 @@ pip install ".[demo]"    # + web demo dependencies
 pip install -e ".[dev]"  # development
 ```
 
+Prefer `requirements` files? They only point at `pyproject.toml`, the single source of truth:
+`pip install -r requirements.txt` (library), `requirements-demo.txt` (+ web demo),
+`requirements-dev.txt` (development).
+
 ## Quick start (CLI)
 
 ```console
