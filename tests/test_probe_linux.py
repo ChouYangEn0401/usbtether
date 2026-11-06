@@ -1,6 +1,13 @@
 import os
+import sys
+
+import pytest
 
 from usbtether.probe.linux import LinuxProbe
+
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32", reason="the fake sysfs tree needs POSIX symlinks"
+)
 
 
 def _build_sysfs(root, *, serial: str | None):

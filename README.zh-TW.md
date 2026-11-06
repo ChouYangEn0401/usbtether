@@ -69,11 +69,12 @@ probe = default_probe()
 authorizer = Authorizer(Verifier(Registry.default()))
 agent = Agent(probe)
 
-session = authorizer.open_session_local(agent)          # 需要已註冊的隨身碟
-with PresenceMonitor(probe, authorizer):                # 拔除時撤銷 session
-    cap = authorizer.issue_capability_local(            # 針對這個動作的全新 challenge
-        agent, session.session_id, resource="database", action="write")
-    authorizer.consume(cap, resource="database", action="write")   # 僅能使用一次
+session = authorizer.open_session_local(agent)  # 需要已註冊的隨身碟
+with PresenceMonitor(probe, authorizer):  # 拔除時撤銷 session
+    cap = authorizer.issue_capability_local(  # 針對這個動作的全新 challenge
+        agent, session.session_id, resource="database", action="write"
+    )
+    authorizer.consume(cap, resource="database", action="write")  # 僅能使用一次
 ```
 
 完整且有測試的範例在 [examples/sdk_quickstart.py](examples/sdk_quickstart.py)。所有錯誤都繼承自 `usbtether.UsbTetherError`；授權失敗為 `AuthorizationError`，帶有穩定的 `reason` 代碼。

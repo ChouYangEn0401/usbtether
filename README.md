@@ -81,11 +81,12 @@ probe = default_probe()
 authorizer = Authorizer(Verifier(Registry.default()))
 agent = Agent(probe)
 
-session = authorizer.open_session_local(agent)          # needs the enrolled drive
-with PresenceMonitor(probe, authorizer):                # revokes the session on unplug
-    cap = authorizer.issue_capability_local(            # fresh challenge for this action
-        agent, session.session_id, resource="database", action="write")
-    authorizer.consume(cap, resource="database", action="write")   # single use
+session = authorizer.open_session_local(agent)  # needs the enrolled drive
+with PresenceMonitor(probe, authorizer):  # revokes the session on unplug
+    cap = authorizer.issue_capability_local(  # fresh challenge for this action
+        agent, session.session_id, resource="database", action="write"
+    )
+    authorizer.consume(cap, resource="database", action="write")  # single use
 ```
 
 A complete, tested version is in [examples/sdk_quickstart.py](examples/sdk_quickstart.py).
