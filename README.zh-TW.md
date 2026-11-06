@@ -88,6 +88,10 @@ with PresenceMonitor(probe, authorizer):  # 拔除時撤銷 session
 
 完整且有測試的範例在 [examples/sdk_quickstart.py](examples/sdk_quickstart.py)。所有錯誤都繼承自 `usbtether.UsbTetherError`；授權失敗為 `AuthorizationError`，帶有穩定的 `reason` 代碼。
 
+## 桌面 App（Windows）
+
+`packaging\build.ps1` 會建出 `usbtether-setup-<版本>.exe`：目前使用者安裝、不需系統管理員。它提供一個小面板，等候隨身碟插入、讓指定資料夾保持加密，並讓 `.utenc` 檔在插著隨身碟時可以雙擊開啟（每次存檔都加密寫回）。使用：[packaging/README.md](packaging/README.md)、[docs/usage.zh-TW.md §7b](docs/usage.zh-TW.md)。建置：[docs/building.zh-TW.md](docs/building.zh-TW.md)。
+
 ## Web demo
 
 用來實驗的測試台（不是可部署的服務），在瀏覽器中走完整個流程：12 步驟的受保護工作流程，以及保險箱解鎖實驗。見 [examples/web_demo](examples/web_demo/README.md)。
@@ -147,6 +151,8 @@ python examples/web_demo/app.py        # http://127.0.0.1:8000
 
 ## 開發
 
+完整指南（環境、檢查、建置安裝程式、發布）：[docs/building.zh-TW.md](docs/building.zh-TW.md)。
+
 ```bash
 pip install -e ".[dev]"
 ruff check . && ruff format --check .
@@ -162,4 +168,6 @@ usbtether 源自一個小型的「USB crypto playground」實驗（capability �
 
 ## 授權
 
-[MIT](LICENSE)
+[MIT](LICENSE) © 2026 [ChouYangEn0401](https://github.com/ChouYangEn0401)。
+
+任何人都可以使用、修改、再散布與販售本軟體，包含商業與閉源產品。唯一條件：在你散布的每一份副本或主要部分中，保留版權聲明與授權全文（[LICENSE](LICENSE) 檔），例如放在原始碼、「關於／第三方授權」畫面，或產品附帶的文件中。也歡迎註明「Based on usbtether by ChouYangEn0401」。

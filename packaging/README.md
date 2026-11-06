@@ -35,6 +35,9 @@ remembered secrets, bound folders): deleting those would make encrypted files un
 
 ## For developers
 
+Full build and release guide: [docs/building.md](../docs/building.md)
+([繁體中文](../docs/building.zh-TW.md)). In short:
+
 ```powershell
 powershell -ExecutionPolicy Bypass -File packaging\build.ps1
 ```
