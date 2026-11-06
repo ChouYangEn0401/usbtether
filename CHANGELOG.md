@@ -25,6 +25,8 @@ First public version.
 - Web demo (Software Guard, Vault Unlock Lab) and an SDK quickstart.
 - `requirements*.txt` files that delegate to `pyproject.toml`.
 - Protocol specification, threat model, device-identity notes and architecture overview.
+- Usage guide (English and Traditional Chinese): install, enroll, verify, management,
+  troubleshooting.
 
 ### Known limitations
 - A drive that reports the same USB descriptor as the enrolled one is accepted.

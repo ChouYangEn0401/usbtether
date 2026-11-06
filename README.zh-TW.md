@@ -41,6 +41,8 @@ pip install -e ".[dev]"  # 開發環境
 
 ## 快速開始（CLI）
 
+Windows 逐步教學、日常管理與疑難排解：**[docs/usage.zh-TW.md](docs/usage.zh-TW.md)**。
+
 ```console
 > usbtether devices
 [1] 0781:5567  SanDisk Cruzer Blade USB Device

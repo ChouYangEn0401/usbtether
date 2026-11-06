@@ -52,6 +52,8 @@ Prefer `requirements` files? They only point at `pyproject.toml`, the single sou
 
 ## Quick start (CLI)
 
+Step-by-step Windows guide, day-to-day management and troubleshooting: **[docs/usage.md](docs/usage.md)**.
+
 ```console
 > usbtether devices
 [1] 0781:5567  SanDisk Cruzer Blade USB Device

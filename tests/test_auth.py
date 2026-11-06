@@ -277,3 +277,19 @@ def test_unencrypted_token_never_triggers_the_passphrase_callback(stick, probe, 
 
     agent = Agent(probe, passphrase=must_not_be_called, clock=clock)
     assert Verifier(registry, clock=clock).authenticate(agent, "login", mount).ok
+
+
+def test_registry_file_can_be_copied_to_another_computer(enrolled, registry, tmp_path, clock):
+    """docs/usage.md: one drive on several computers = copy registry.json to each of them."""
+    _, agent, _, mount = enrolled
+    other_host = tmp_path / "other-pc" / "registry.json"
+    other_host.parent.mkdir()
+    shutil.copy(registry.path, other_host)
+
+    from usbtether.registry import Registry
+
+    other_verifier = Verifier(Registry(other_host), clock=clock)
+    assert other_verifier.authenticate(agent, "login", mount).ok
+    # A host that never received the registry does not know the token.
+    stranger = Verifier(Registry(tmp_path / "empty.json"), clock=clock)
+    assert stranger.authenticate(agent, "login", mount).reason is FailureReason.UNKNOWN_TOKEN
