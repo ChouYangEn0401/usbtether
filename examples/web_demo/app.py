@@ -1,0 +1,298 @@
+"""usbtether web demo.
+
+A small FastAPI app that exercises the library end to end:
+
+* **Software Guard**: a 12-step workflow. Every step needs a fresh challenge-response with
+  the enrolled USB drive and yields a single-use, scoped, 8-second capability. Unplugging the
+  drive revokes the session.
+* **Vault Unlock Lab**: unlock a fictional vault either by solving a puzzle or with a
+  USB-backed challenge-response bound to that one vault challenge.
+
+This is an experiment harness, **not** a deployable service. It has no user authentication,
+runs the agent and the verifier in one process, and refuses to bind to non-loopback
+addresses.
+
+Run (after ``usbtether enroll E:``)::
+
+    pip install -e ".[demo]"
+    python examples/web_demo/app.py
+
+If the drive's key is passphrase-protected, export ``USBTETHER_PASSPHRASE`` first.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import secrets
+import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Any
+
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse
+from pydantic import BaseModel
+
+from usbtether.agent import Agent
+from usbtether.authz import Authorizer, Capability
+from usbtether.errors import (
+    AuthorizationError,
+    TokenLockedError,
+    UnsupportedDeviceError,
+    UsbTetherError,
+)
+from usbtether.monitor import PresenceMonitor
+from usbtether.probe import DeviceProbe, default_probe
+from usbtether.registry import Registry
+from usbtether.verifier import Verifier
+
+RESOURCE = "demo-workflow"
+RETRY_MS = 2500
+# Failures that retrying will not fix: the session is gone or the drive is the wrong one.
+FATAL_REASONS = {
+    "session_inactive",
+    "unknown_session",
+    "device_mismatch",
+    "token_revoked",
+    "unknown_token",
+    "bad_signature",
+    "token_mismatch",
+    "device_unsupported",
+}
+
+
+class GuardStart(BaseModel):
+    total_steps: int = 12
+
+
+class GuardAuthorize(BaseModel):
+    session_id: str
+    step: int
+
+
+class GuardConsume(BaseModel):
+    session_id: str
+    step: int
+    capability: dict[str, Any]
+
+
+class VaultSolve(BaseModel):
+    challenge_id: str
+    answer: int
+
+
+class VaultUsb(BaseModel):
+    challenge_id: str
+
+
+def _explain(exc: Exception) -> tuple[str, bool]:
+    """Human message and whether retrying is pointless."""
+    if isinstance(exc, AuthorizationError):
+        return f"{exc.reason}: {exc}", exc.reason in FATAL_REASONS
+    if isinstance(exc, TokenLockedError):
+        return "The key is passphrase-protected. Set USBTETHER_PASSPHRASE and restart.", True
+    if isinstance(exc, UnsupportedDeviceError):
+        return str(exc), True
+    return str(exc), False
+
+
+def create_app(
+    probe: DeviceProbe | None = None,
+    registry: Registry | None = None,
+    *,
+    passphrase: bytes | None = None,
+    monitor_interval: float | None = 1.0,
+) -> FastAPI:
+    """Build the app. ``monitor_interval=None`` disables the background thread (for tests)."""
+    probe = probe or default_probe()
+    registry = registry or Registry.default()
+    if passphrase is None and os.environ.get("USBTETHER_PASSPHRASE"):
+        passphrase = os.environ["USBTETHER_PASSPHRASE"].encode("utf-8")
+
+    verifier = Verifier(registry)
+    authorizer = Authorizer(verifier)
+    agent = Agent(probe, passphrase=passphrase)
+    monitor = PresenceMonitor(probe, authorizer, interval=monitor_interval or 1.0)
+    workflows: dict[str, dict[str, int]] = {}
+    vault: dict[str, dict[str, Any]] = {}
+    html = (Path(__file__).parent / "index.html").read_text(encoding="utf-8")
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        if monitor_interval is not None:
+            monitor.start()
+        try:
+            yield
+        finally:
+            monitor.stop()
+
+    app = FastAPI(title="usbtether demo", lifespan=lifespan)
+    app.state.authorizer = authorizer
+    app.state.verifier = verifier
+    app.state.monitor = monitor
+
+    @app.get("/", response_class=HTMLResponse)
+    def home() -> str:
+        return html
+
+    @app.get("/api/status")
+    def status() -> dict[str, Any]:
+        try:
+            devices = probe.list_devices()
+            probe_error = None
+        except UsbTetherError as exc:
+            devices, probe_error = [], str(exc)
+        listed = []
+        for d in devices:
+            enrolled = d.is_bindable and bool(registry.active_for_fingerprint(d.fingerprint))
+            listed.append(
+                {
+                    "id": f"{d.vendor_id}:{d.product_id}",
+                    "product": d.product,
+                    "serial_quality": d.serial_quality.value,
+                    "bindable": d.is_bindable,
+                    "enrolled": enrolled,
+                    "mounts": [v.mount_point for v in d.volumes],
+                }
+            )
+        return {
+            "devices": listed,
+            "ready": any(x["enrolled"] for x in listed),
+            "probe_error": probe_error,
+            "sessions": [
+                {
+                    "id": s.session_id[:8],
+                    "active": s.is_active(time.time()),
+                    "reason": s.revoked_reason,
+                }
+                for s in list(authorizer._sessions.values())[-5:]
+            ],
+        }
+
+    # -- Software Guard ------------------------------------------------------------------
+
+    @app.post("/api/guard/start")
+    def guard_start(req: GuardStart) -> dict[str, Any]:
+        total = max(1, min(req.total_steps, 100))
+        try:
+            session = authorizer.open_session_local(agent)
+        except UsbTetherError as exc:
+            message, fatal = _explain(exc)
+            return {"started": False, "reason": message, "fatal": fatal, "retry_after_ms": RETRY_MS}
+        workflows[session.session_id] = {"total": total, "last_consumed": 0}
+        return {
+            "started": True,
+            "session_id": session.session_id,
+            "total_steps": total,
+            "drive": session.fingerprint[:12],
+        }
+
+    @app.post("/api/guard/authorize")
+    def guard_authorize(req: GuardAuthorize) -> dict[str, Any]:
+        flow = workflows.get(req.session_id)
+        if flow is None:
+            raise HTTPException(404, "Unknown demo session")
+        if req.step != flow["last_consumed"] + 1:
+            raise HTTPException(409, "Steps must be authorized in order")
+        if req.step > flow["total"]:
+            raise HTTPException(409, "Workflow complete")
+        try:
+            cap = authorizer.issue_capability_local(
+                agent, req.session_id, RESOURCE, f"execute_step:{req.step}"
+            )
+        except UsbTetherError as exc:
+            message, fatal = _explain(exc)
+            return {
+                "authorized": False,
+                "reason": message,
+                "fatal": fatal,
+                "retry_after_ms": RETRY_MS,
+            }
+        return {
+            "authorized": True,
+            "capability": cap.to_dict(),
+            "signature_preview": cap.signature[:20] + "...",
+        }
+
+    @app.post("/api/guard/consume")
+    def guard_consume(req: GuardConsume) -> dict[str, Any]:
+        flow = workflows.get(req.session_id)
+        if flow is None or req.step != flow["last_consumed"] + 1:
+            raise HTTPException(409, "Workflow state mismatch")
+        try:
+            cap = Capability.from_dict(req.capability)
+            if cap.session_id != req.session_id:
+                raise AuthorizationError("scope_mismatch", "capability belongs to another session")
+            authorizer.consume(cap, resource=RESOURCE, action=f"execute_step:{req.step}")
+        except AuthorizationError as exc:
+            code = 409 if exc.reason == "capability_used" else 403
+            raise HTTPException(code, f"{exc.reason}") from exc
+        flow["last_consumed"] = req.step
+        return {"consumed": True, "step": req.step, "remaining_steps": flow["total"] - req.step}
+
+    # -- Vault Unlock Lab ----------------------------------------------------------------
+
+    def _live_vault(challenge_id: str) -> dict[str, Any]:
+        ch = vault.get(challenge_id)
+        if not ch or ch["used"] or time.time() > ch["expires_at"]:
+            raise HTTPException(410, "Challenge expired or already used")
+        return ch
+
+    @app.post("/api/vault/new")
+    def vault_new() -> dict[str, Any]:
+        challenge_id = secrets.token_urlsafe(16)
+        x = secrets.randbelow(80) + 10
+        vault[challenge_id] = {
+            "expected": (x * 7 + 13) % 97,
+            "used": False,
+            "expires_at": time.time() + 180,
+        }
+        return {
+            "challenge_id": challenge_id,
+            "question": f"Compute y = ({x} x 7 + 13) mod 97.",
+            "x": x,
+            "expires_in_seconds": 180,
+        }
+
+    @app.post("/api/vault/solve")
+    def vault_solve(req: VaultSolve) -> dict[str, Any]:
+        ch = _live_vault(req.challenge_id)
+        if req.answer != ch["expected"]:
+            return {"unlocked": False, "message": "Wrong answer. The vault stays locked."}
+        ch["used"] = True
+        return {"unlocked": True, "message": "Puzzle solved. Demo vault unlocked."}
+
+    @app.post("/api/vault/usb")
+    def vault_usb(req: VaultUsb) -> dict[str, Any]:
+        ch = _live_vault(req.challenge_id)
+        try:
+            result = verifier.authenticate(agent, f"vault-unlock:{req.challenge_id}")
+        except UsbTetherError as exc:
+            return {"unlocked": False, "message": _explain(exc)[0]}
+        if not result.ok:
+            reason = result.reason.value if result.reason else "failed"
+            return {"unlocked": False, "message": f"USB check failed: {reason}"}
+        ch["used"] = True
+        return {"unlocked": True, "message": "USB challenge-response accepted. Vault unlocked."}
+
+    return app
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="usbtether web demo")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=8000)
+    args = parser.parse_args()
+    if args.host not in {"127.0.0.1", "localhost", "::1"}:
+        raise SystemExit(
+            "refusing to bind to a non-loopback address: the demo has no authentication"
+        )
+    import uvicorn
+
+    uvicorn.run(create_app(), host=args.host, port=args.port)
+
+
+if __name__ == "__main__":
+    main()
