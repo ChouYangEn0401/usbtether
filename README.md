@@ -4,6 +4,8 @@
 
 [English](README.md) · [繁體中文](README.zh-TW.md)
 
+[![CI](https://github.com/ChouYangEn0401/usbtether/actions/workflows/ci.yml/badge.svg)](https://github.com/ChouYangEn0401/usbtether/actions/workflows/ci.yml)
+
 usbtether turns a plain USB flash drive into a *presence-bound credential*: a program can
 require that one specific, previously enrolled drive is plugged in before it opens a session,
 and can re-check that on every sensitive step.

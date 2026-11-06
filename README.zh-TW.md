@@ -4,6 +4,8 @@
 
 [English](README.md) · [繁體中文](README.zh-TW.md)
 
+[![CI](https://github.com/ChouYangEn0401/usbtether/actions/workflows/ci.yml/badge.svg)](https://github.com/ChouYangEn0401/usbtether/actions/workflows/ci.yml)
+
 usbtether 把一般的 USB 隨身碟變成「在場證明型」憑證：程式可以要求「必須插著當初註冊過的那一支隨身碟」才能開啟工作階段，並且在每個敏感步驟重新確認。
 
 * **綁定實體裝置**：憑證是存放在隨身碟上的 Ed25519 金鑰，並且在主機端與該隨身碟的 USB 描述資訊（廠商 ID、產品 ID、序號）綁定。把檔案複製到另一支隨身碟，得到的不是可用的複本。

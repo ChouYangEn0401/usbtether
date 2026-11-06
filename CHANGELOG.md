@@ -50,6 +50,6 @@ First public version.
 - Removal detection is polling-based.
 - The registry is neither signed nor encrypted.
 
-[Unreleased]: ../../compare/v0.2.0...HEAD
-[0.2.0]: ../../compare/v0.1.0...v0.2.0
-[0.1.0]: ../../releases/tag/v0.1.0
+[Unreleased]: https://github.com/ChouYangEn0401/usbtether/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/ChouYangEn0401/usbtether/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/ChouYangEn0401/usbtether/releases/tag/v0.1.0

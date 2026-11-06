@@ -20,7 +20,8 @@ In scope: flaws that break a documented guarantee, such as
 ## Reporting
 
 Please use GitHub's **private vulnerability reporting** (repository *Security* tab, *Report a
-vulnerability*). Do not open a public issue for security problems.
+vulnerability*), or go directly to <https://github.com/ChouYangEn0401/usbtether/security/advisories/new>.
+Do not open a public issue for security problems.
 
 Include the version, platform, a description, and, if possible, a failing test or steps to
 reproduce. Remove or redact real serial numbers.
