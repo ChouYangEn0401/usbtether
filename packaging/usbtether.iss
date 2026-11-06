@@ -12,7 +12,9 @@
 AppId={{6F0E4C7A-3B51-4C2E-9E58-6A1D2C7B9F21}
 AppName=usbtether
 AppVersion={#AppVersion}
-AppPublisher=usbtether contributors
+AppPublisher=ChouYangEn0401
+AppPublisherURL=https://github.com/ChouYangEn0401
+LicenseFile=..\LICENSE
 DefaultDirName={localappdata}\Programs\usbtether
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest

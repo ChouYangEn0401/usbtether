@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 license-files = ["LICENSE"]
-authors = [{ name = "usbtether contributors" }]
+authors = [{ name = "ChouYangEn0401" }]
 keywords = ["usb", "authentication", "challenge-response", "ed25519", "presence", "windows"]
 classifiers = [
     "Development Status :: 3 - Alpha",

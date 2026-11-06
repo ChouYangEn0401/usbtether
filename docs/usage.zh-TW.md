@@ -110,6 +110,47 @@ python examples\web_demo\app.py
 
 開啟 <http://127.0.0.1:8000>。用 `--remember` 註冊的直接可用；`--passphrase` 的要先設環境變數：`$env:USBTETHER_PASSPHRASE="..."`（PowerShell）或 `set USBTETHER_PASSPHRASE=...`（cmd）。詳見 [examples/web_demo/README.md](../examples/web_demo/README.md)。
 
+## 7b. 加密檔案：雙擊開啟
+
+讓檔案在磁碟上一直是加密的，只有插著隨身碟時才打得開。
+
+**最簡單：桌面 App。** 安裝 `usbtether-setup-<版本>.exe`（取得或自行建置見 [docs/building.zh-TW.md](building.zh-TW.md)）。安裝程式會註冊 `.utenc` 的雙擊開啟，並提供一個小面板：等候隨身碟插入，並讓「綁定資料夾」保持加密。勾選 *Start with Windows* 就會開機常駐。不需要開網頁。
+
+面板內容：
+
+* **狀態燈**：琥珀色「Waiting for the USB drive」、綠色「Unlocked」（隨身碟已通過 challenge-response 驗證）、紅色「Locked」並顯示原因（附 *Unlock* 按鈕重試）。
+* **Bound folders**：*+ Add folder* 綁定資料夾並加密裡面的檔案；*Auto-encrypt* 開啟時，存進去的新明文檔幾秒內就會被加密；手動模式則按 *Encrypt now*。*Open* 在檔案總管開啟資料夾。
+* **One-off**：挑檔案直接加密或解密（放在原檔旁邊），可選擇事後刪除來源。
+* **Settings**：自動加密、雙擊開啟註冊、開機啟動。
+
+關掉面板只會停止自動加密；雙擊開檔照常可用（那是檔案總管另外啟動的 `usbtether.exe open "<檔案>"`）。
+
+**用命令列**（不裝安裝程式）：
+
+```
+usbtether register                      # 一次：雙擊 *.utenc 會執行 "usbtether open"
+usbtether app                           # 同一個面板，從 Python 啟動
+usbtether vault lock D:\Secret          # 手動加密整個資料夾
+```
+
+接著在檔案總管雙擊 `D:\Secret\report.docx.utenc`。`usbtether open` 會檢查隨身碟、把檔案解密到 `%APPDATA%\usbtether\open\<id>\report.docx`，再用 Word 開啟。每次存檔約一秒內就加密寫回 `report.docx.utenc`。拔掉隨身碟，工作副本就會刪除。沒插隨身碟時會跳出提示，檔案不會打開。`usbtether register --remove` 可移除註冊（只動 `HKCU\Software\Classes\.utenc` 與 `usbtether.encfile`，不需要系統管理員）。
+
+| 情況 | 會發生什麼 |
+|---|---|
+| 雙擊沒反應／跳出「選擇應用程式」 | 尚未註冊：在面板勾選 *Double-click a .utenc file*，或執行 `usbtether register`。如果你曾對 `.utenc` 選過「一律使用此應用程式」，Windows 會沿用那個選擇：請在「開啟檔案 > 選擇其他應用程式」選 *usbtether* 並勾「一律使用」 |
+| 編輯器會鎖住檔案（Word、Excel） | 工作副本保留到拔掉隨身碟，或你關閉檔案後 30 分鐘沒有存檔 |
+| 編輯器不鎖檔案（記事本） | 無法偵測「已關閉」：拔掉隨身碟或 30 分鐘沒存檔時刪除副本（用 `--idle-timeout` 調整） |
+| 檔案開著時拔掉（或退出）隨身碟 | 沒有程式鎖著就立刻刪除副本；若還被程式開著，會跳出提示請你關閉，期間的存檔照樣加密寫回（金鑰只為此留在記憶體），關閉的那一刻就刪除副本 |
+| 檔案開著時把資料夾改名或搬走 | 下一次存檔會寫到檔案的新位置：在舊位置附近或綁定資料夾中，以檔名加上完全相同的加密內容找到它。不會重建舊資料夾 |
+| 開著時 `.utenc` 被刪掉或搬到很遠 | 存檔不會遺失：以加密形式存到 `%APPDATA%\usbtether\recovered\<時間>\` |
+| 綁定的資料夾改名 | 面板會跟上（以資料夾的檔案 ID 追蹤），繼續保護 |
+| 退出隨身碟時說「裝置使用中」 | helper 與面板都在 `%APPDATA%\usbtether` 工作，不會占住隨身碟；是其他程式開著隨身碟上的檔案 |
+| helper 被強制結束 | 下次 `usbtether open`（或面板）會先把沒同步的修改加密寫回，等沒有程式鎖著時刪除殘留 |
+| 綁定資料夾裡放程式（`.exe`） | 只會解出那一個檔案，旁邊的 DLL／資料檔不會跟著，多半跑不起來：綁定資料夾適合放文件 |
+| 用 `--force` 重新註冊隨身碟 | **用舊金鑰加密的檔案永遠打不開**（金鑰來自 token） |
+
+限制：檔案開著時，明文副本存在磁碟上，你帳號下執行的任何程式都讀得到；金鑰在 helper 的記憶體中。綁定資料夾的自動加密只在面板（或 web demo）執行時有效。解鎖後是以「已驗證的磁碟機上 token 資料夾是否存在」判斷隨身碟在不在（即時，不用約 2 秒的 USB 查詢）。
+
 ## 8. 日常管理
 
 | 想做什麼 | 指令 |
@@ -138,6 +179,10 @@ python examples\web_demo\app.py
 | 公鑰、裝置指紋、撤銷紀錄 | Windows：`%APPDATA%\usbtether\registry.json`；Linux：`~/.local/share/usbtether/registry.json` |
 | `--remember` 金鑰的密鑰 | Windows：`%APPDATA%\usbtether\secrets\<token id>.bin`，以 DPAPI 封裝（只有你的 Windows 帳號讀得出來）；Linux：同路徑，僅擁有者可讀的檔案權限 |
 | Session、capability、challenge | 只在程式記憶體中，程式結束就消失 |
+| 綁定資料夾 | `%APPDATA%\usbtether\bound.json` |
+| 開啟中 `.utenc` 的工作副本 | 開啟期間在 `%APPDATA%\usbtether\open\<id>\`，之後刪除 |
+| 找不到原檔時救回的存檔 | `%APPDATA%\usbtether\recovered\<時間>\`（仍是加密的） |
+| 雙擊開啟的關聯 | `HKCU\Software\Classes\.utenc` 與 `HKCU\Software\Classes\usbtether.encfile` |
 
 請把 `registry.json` 當成憑證庫看待（誰能寫入它，誰就能註冊 token），並且不要把 `.usbtether/` 或 `registry.json` 提交到版本控制（專案的 `.gitignore` 已排除）。
 
