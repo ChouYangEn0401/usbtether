@@ -15,8 +15,16 @@ from .agent import Agent
 from .device import UsbDevice
 from .enrollment import enroll
 from .errors import ProbeError, UsbTetherError
+from .opener import (
+    association_command,
+    default_command,
+    open_encrypted,
+    register_association,
+    sweep,
+    unregister_association,
+)
 from .probe import DeviceProbe, default_probe
-from .registry import Registry
+from .registry import Registry, default_home
 from .secretstore import HostSecretStore, default_secret_store
 from .vault import VaultWatcher, drive_key, lock_folder, unlock_folder
 from .verifier import Verifier
@@ -179,6 +187,59 @@ def _cmd_vault(args: argparse.Namespace, probe: Callable[[], DeviceProbe], reg: 
     return EXIT_OK
 
 
+def _tell(message: str) -> None:
+    """Report an error where the user can see it, even when launched without a console."""
+    if sys.stderr is not None and sys.stderr.isatty():
+        print(f"error: {message}", file=sys.stderr)
+    elif sys.platform == "win32":
+        import ctypes
+
+        ctypes.windll.user32.MessageBoxW(None, message, "usbtether", 0x10)
+
+
+def _cmd_open(args: argparse.Namespace, probe: Callable[[], DeviceProbe], reg: Registry) -> int:
+    home = Path(args.home) if args.home else default_home()
+    agent = Agent(
+        probe(),
+        passphrase=lambda: _prompt_passphrase(confirm=False),
+        secret_store=_store(args),
+    )
+
+    def present() -> bool:
+        try:
+            return bool(agent.candidates())
+        except UsbTetherError:
+            return False
+
+    try:
+        key = drive_key(agent, Verifier(reg))
+    except UsbTetherError as exc:
+        _tell(
+            f"Cannot open {Path(args.file).name}: {exc}\nPlug in the enrolled drive and try again."
+        )
+        return EXIT_FAILED
+    sweep(home, key)
+    open_encrypted(
+        Path(args.file),
+        key,
+        home,
+        present=present,
+        idle_timeout=args.idle_timeout,
+        on_event=lambda m: print(m, flush=True) if sys.stdout is not None else None,
+    )
+    return EXIT_OK
+
+
+def _cmd_register(args: argparse.Namespace, _: Callable[[], DeviceProbe], __: Registry) -> int:
+    home = Path(args.home) if args.home else None
+    if args.remove:
+        print("Removed the .utenc association." if unregister_association() else "Not registered.")
+        return EXIT_OK
+    register_association(default_command(home))
+    print(f"Registered: double-clicking *.utenc runs\n  {association_command()}")
+    return EXIT_OK
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="usbtether",
@@ -222,6 +283,24 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("folder")
     p.add_argument("--interval", type=float, default=1.0, help="watch: seconds between checks")
     p.set_defaults(func=_cmd_vault)
+
+    p = sub.add_parser(
+        "open", help="decrypt a .utenc file, open it, and encrypt it back when you save"
+    )
+    p.add_argument("file")
+    p.add_argument(
+        "--idle-timeout",
+        type=float,
+        default=1800.0,
+        help="seconds without a save before the plain copy is deleted (default 1800)",
+    )
+    p.set_defaults(func=_cmd_open)
+
+    p = sub.add_parser(
+        "register", help="Windows: make double-clicking a .utenc file run 'usbtether open'"
+    )
+    p.add_argument("--remove", action="store_true", help="undo the registration")
+    p.set_defaults(func=_cmd_register)
 
     p = sub.add_parser("list", help="show tokens registered on this host")
     p.set_defaults(func=_cmd_list)

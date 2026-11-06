@@ -41,6 +41,10 @@ examples/
   enrolled drive right now?".
 * **Authorization** (`Authorizer`) decides what that allows, for how long.
 * **Enrollment** creates the binding. It is the only code that writes to the drive.
+* **File encryption** sits beside the authorizer: `vault` derives an AES key from the token
+  (`Agent.derive_key`, after a challenge-response) and encrypts files to `.utenc`; `opener`
+  builds on it for double-click access (Windows file association, working copy kept in sync,
+  `sweep` for crash leftovers) and bound folders. The key changes when a drive is re-enrolled.
 
 Each layer only depends on the ones below it. The probe is the sole platform-specific piece:
 porting to another OS means implementing `DeviceProbe.list_devices()`.

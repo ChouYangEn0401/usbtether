@@ -41,20 +41,30 @@ class VaultResult:
     skipped: int
 
 
-def encrypt_file(path: Path, key: bytes) -> Path:
-    """Encrypt ``path`` into ``path + '.utenc'`` and delete the original."""
-    target = path.with_name(path.name + SUFFIX)
+def encrypt_file(
+    path: Path, key: bytes, *, dest_dir: Path | None = None, keep: bool = False
+) -> Path:
+    """Encrypt ``path`` into ``<name>.utenc``.
+
+    By default the result sits next to the original and the original is deleted. ``dest_dir``
+    writes it elsewhere instead; ``keep=True`` leaves the original in place.
+    """
+    target = (dest_dir or path.parent) / (path.name + SUFFIX)
+    target.parent.mkdir(parents=True, exist_ok=True)
     nonce = secrets.token_bytes(12)
     blob = MAGIC + nonce + AESGCM(key).encrypt(nonce, path.read_bytes(), path.name.encode())
     tmp = target.with_name(target.name + ".tmp")
     tmp.write_bytes(blob)
     os.replace(tmp, target)
-    path.unlink()
+    if not keep:
+        path.unlink()
     return target
 
 
-def decrypt_file(path: Path, key: bytes) -> Path:
-    """Decrypt a ``.utenc`` file back to its original name and delete the encrypted copy."""
+def decrypt_file(
+    path: Path, key: bytes, *, dest_dir: Path | None = None, keep: bool = False
+) -> Path:
+    """Decrypt a ``.utenc`` file back to its original name (same options as ``encrypt_file``)."""
     original = path.name[: -len(SUFFIX)]
     blob = path.read_bytes()
     if not blob.startswith(MAGIC) or len(blob) < len(MAGIC) + 12 + 16:
@@ -64,11 +74,13 @@ def decrypt_file(path: Path, key: bytes) -> Path:
         data = AESGCM(key).decrypt(nonce, blob[len(MAGIC) + 12 :], original.encode())
     except InvalidTag as exc:
         raise VaultError(f"cannot decrypt {path.name}: wrong key or the file was altered") from exc
-    target = path.with_name(original)
+    target = (dest_dir or path.parent) / original
+    target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.with_name(target.name + ".tmp")
     tmp.write_bytes(data)
     os.replace(tmp, target)
-    path.unlink()
+    if not keep:
+        path.unlink()
     return target
 
 

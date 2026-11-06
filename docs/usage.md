@@ -129,6 +129,33 @@ Open <http://127.0.0.1:8000>. A key enrolled with `--remember` just works. For a
 `$env:USBTETHER_PASSPHRASE="..."` (PowerShell) or `set USBTETHER_PASSPHRASE=...` (cmd).
 Details: [examples/web_demo/README.md](../examples/web_demo/README.md).
 
+## 7b. Encrypted files: double-click to open
+
+Keep files encrypted on disk and open them only while the drive is plugged in:
+
+```
+usbtether register                      # once: double-clicking *.utenc runs "usbtether open"
+usbtether vault lock D:\Secret          # encrypt a folder (or use the web demo's tabs 03/04)
+```
+
+Now double-click `D:\Secret\report.docx.utenc` in Explorer. `usbtether open` checks the
+drive, decrypts the file into `%APPDATA%\usbtether\open\<id>\report.docx`, and opens it in
+Word. Every save is encrypted back over `report.docx.utenc` within about a second. Pull the
+drive out and the working copy is deleted. Without the drive a message box says so and nothing
+opens. `usbtether register --remove` undoes the registration (it only touches
+`HKCU\Software\Classes\.utenc` and `usbtether.encfile`; no admin needed).
+
+| Situation | What happens |
+|---|---|
+| Editor keeps the file locked (Word, Excel) | working copy stays until the drive is pulled or you close it and 30 min pass without a save |
+| Editor keeps no lock (Notepad) | same; "closed" cannot be detected, so the 30 min idle rule applies (`--idle-timeout` to change) |
+| The helper is killed | the next `usbtether open` (or the web demo) syncs unsaved changes back and deletes the leftover |
+| You re-enroll with `--force` | **files encrypted with the old key can never be opened again** (the key comes from the token) |
+
+Limits: while a file is open its plain copy is on disk where any program running as you can
+read it, and the key is in the helper's memory. The web demo's *Bound Folders* tab also
+encrypts new plain files that appear in a bound folder (only while the demo runs).
+
 ## 8. Day-to-day management
 
 | Goal | Command |
@@ -168,6 +195,9 @@ several computers use `--passphrase` (or no encryption).
 | Public keys, drive fingerprints, revocations | Windows: `%APPDATA%\usbtether\registry.json`; Linux: `~/.local/share/usbtether/registry.json` |
 | Secrets for `--remember` keys | Windows: `%APPDATA%\usbtether\secrets\<token id>.bin`, sealed with DPAPI (only your Windows account can read it); Linux: the same path, owner-only file permissions |
 | Sessions, capabilities, challenges | process memory only; gone when the program exits |
+| Bound folders (web demo) | `%APPDATA%\usbtether\bound.json` |
+| Working copies of opened `.utenc` files | `%APPDATA%\usbtether\open\<id>\` while open; removed afterwards |
+| Double-click association | `HKCU\Software\Classes\.utenc` and `HKCU\Software\Classes\usbtether.encfile` |
 
 Treat `registry.json` like a credential store (whoever can write it can enroll tokens), and
 never commit `.usbtether/` or `registry.json` to version control (the repository's
