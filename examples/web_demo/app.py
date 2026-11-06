@@ -348,15 +348,30 @@ def create_app(
 def main() -> None:
     parser = argparse.ArgumentParser(description="usbtether web demo")
     parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument(
+        "--port", type=int, default=8000, help="first port to try (next free one is used)"
+    )
     args = parser.parse_args()
     if args.host not in {"127.0.0.1", "localhost", "::1"}:
         raise SystemExit(
             "refusing to bind to a non-loopback address: the demo has no authentication"
         )
+    import socket
+
     import uvicorn
 
-    uvicorn.run(create_app(), host=args.host, port=args.port)
+    port = args.port
+    for candidate in range(args.port, args.port + 20):
+        with socket.socket(socket.AF_INET6 if ":" in args.host else socket.AF_INET) as sock:
+            if sock.connect_ex((args.host, candidate)) != 0:  # nothing is listening there
+                port = candidate
+                break
+    else:
+        raise SystemExit(f"no free port in {args.port}-{args.port + 19}")
+    if port != args.port:
+        print(f"port {args.port} is busy; using {port}")
+    print(f"Open http://{args.host}:{port}")
+    uvicorn.run(create_app(), host=args.host, port=port)
 
 
 if __name__ == "__main__":
