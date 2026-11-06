@@ -186,3 +186,35 @@ def test_enroll_twice_needs_force(demo):
     assert again["ok"] is False and again["already"] is True
     forced = client.post("/api/usb/enroll", json={"mount": str(mount), "force": True}).json()
     assert forced["ok"] and len(forced["revoked"]) == 1
+
+
+def test_file_vault_follows_the_drive(demo, stick):
+    client, app, mount = demo
+    device, _ = stick
+    assert client.post("/api/usb/enroll", json={"mount": str(mount)}).json()["ok"]
+    assert client.post("/api/box/unlock").json()["ok"]
+    put = client.put("/api/box/file", params={"name": "docs/a.txt"}, content=b"top secret")
+    assert put.json()["ok"]
+    files = client.get("/api/box").json()["files"]
+    assert files == [{"name": "docs/a.txt", "size": 10, "encrypted": False}]
+    assert client.get("/api/box/file", params={"name": "docs/a.txt"}).content == b"top secret"
+
+    app.state.monitor._probe.remove(device)  # pull the drive out
+    app.state.box_check()
+    state = client.get("/api/box").json()
+    assert state["unlocked"] is False and state["files"][0]["encrypted"] is True
+    assert client.get("/api/box/file", params={"name": "docs/a.txt"}).status_code == 403
+
+    app.state.monitor._probe.add(device)  # and back in
+    app.state.box_check()
+    assert client.get("/api/box").json()["unlocked"] is True
+    assert client.get("/api/box/file", params={"name": "docs/a.txt"}).content == b"top secret"
+
+
+def test_file_vault_rejects_path_escape_and_needs_the_drive(demo):
+    client, _, mount = demo
+    assert client.put("/api/box/file", params={"name": "../x"}, content=b"x").status_code == 400
+    assert client.put("/api/box/file", params={"name": "a.txt"}, content=b"x").json()["ok"] is False
+    client.post("/api/usb/enroll", json={"mount": str(mount)})
+    assert client.put("/api/box/file", params={"name": "a.txt"}, content=b"x").json()["ok"]
+    assert client.get("/api/box").json()["files"][0]["encrypted"] is True  # box was locked

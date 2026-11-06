@@ -27,14 +27,15 @@ from __future__ import annotations
 import argparse
 import os
 import secrets
+import threading
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 
 from usbtether.agent import Agent
@@ -49,12 +50,14 @@ from usbtether.errors import (
 )
 from usbtether.monitor import PresenceMonitor
 from usbtether.probe import DeviceProbe, default_probe
-from usbtether.registry import Registry
+from usbtether.registry import Registry, default_home
 from usbtether.secretstore import HostSecretStore
+from usbtether.vault import SUFFIX, drive_key, encrypt_file, lock_folder, unlock_folder
 from usbtether.verifier import Verifier
 
 RESOURCE = "demo-workflow"
 RETRY_MS = 2500
+MAX_UPLOAD = 20 * 1024 * 1024
 # Failures that retrying will not fix: the session is gone or the drive is the wrong one.
 FATAL_REASONS = {
     "session_inactive",
@@ -76,6 +79,10 @@ class EnrollRequest(BaseModel):
 
 class VerifyRequest(BaseModel):
     mount: str | None = None
+
+
+class BoxAuto(BaseModel):
+    auto: bool
 
 
 class GuardStart(BaseModel):
@@ -125,6 +132,7 @@ def create_app(
     passphrase: bytes | None = None,
     secret_store: HostSecretStore | None = None,
     monitor_interval: float | None = 1.0,
+    vault_dir: Path | None = None,
 ) -> FastAPI:
     """Build the app. ``monitor_interval=None`` disables the background thread (for tests)."""
     probe = probe or default_probe()
@@ -144,10 +152,13 @@ def create_app(
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         if monitor_interval is not None:
             monitor.start()
+            app.state.box_start()
         try:
             yield
         finally:
             monitor.stop()
+            if monitor_interval is not None:
+                app.state.box_stop.set()
 
     app = FastAPI(title="usbtether demo", lifespan=lifespan)
     app.state.authorizer = authorizer
@@ -235,6 +246,137 @@ def create_app(
             "warnings": list(result.warnings),
             "message": "Challenge-response accepted. This is the drive that was enrolled.",
         }
+
+    # -- File Vault ----------------------------------------------------------------------
+
+    box_dir = vault_dir or (default_home() / "web-vault")
+    box_dir.mkdir(parents=True, exist_ok=True)
+    box: dict[str, Any] = {"key": None, "auto": True, "note": ""}
+    box_lock = threading.RLock()
+
+    def _box_path(name: str) -> Path:
+        """Resolve a user-supplied relative path inside the vault folder (no escaping)."""
+        parts = [p for p in name.replace("\\", "/").split("/") if p not in ("", ".")]
+        if not parts or any(p == ".." or ":" in p for p in parts):
+            raise HTTPException(400, "Invalid file name")
+        target = box_dir.joinpath(*parts)
+        if box_dir.resolve() not in target.resolve().parents:
+            raise HTTPException(400, "Invalid file name")
+        return target
+
+    def box_unlock() -> str:
+        with box_lock:
+            key = drive_key(agent, verifier)
+            result = unlock_folder(box_dir, key)
+            box["key"] = key
+            return f"Unlocked {result.changed} file(s)."
+
+    def box_lock_now() -> str:
+        with box_lock:
+            key = box["key"] or drive_key(agent, verifier)
+            result = lock_folder(box_dir, key)
+            box["key"] = None
+            return f"Locked {result.changed} file(s)."
+
+    def box_check() -> None:
+        """Auto behaviour: lock when the drive is gone; unlock when it appears (if auto)."""
+        with box_lock:
+            try:
+                present = bool(agent.candidates())
+            except UsbTetherError:
+                return
+            try:
+                if not present and box["key"] is not None:
+                    box["note"] = "Drive removed: " + box_lock_now()
+                elif present and box["key"] is None and box["auto"]:
+                    box["note"] = "Drive detected: " + box_unlock()
+            except UsbTetherError as exc:
+                box["note"] = _explain(exc)[0]
+
+    app.state.box_check = box_check
+
+    @app.get("/api/box")
+    def box_state() -> dict[str, Any]:
+        files = [
+            {
+                "name": p.relative_to(box_dir).as_posix(),
+                "size": p.stat().st_size,
+                "encrypted": p.name.endswith(SUFFIX),
+            }
+            for p in sorted(box_dir.rglob("*"))
+            if p.is_file() and not p.name.endswith(".tmp")
+        ]
+        return {
+            "unlocked": box["key"] is not None,
+            "auto": box["auto"],
+            "note": box["note"],
+            "folder": str(box_dir),
+            "files": files,
+        }
+
+    @app.post("/api/box/unlock")
+    def box_unlock_api() -> dict[str, Any]:
+        try:
+            return {"ok": True, "message": box_unlock()}
+        except UsbTetherError as exc:
+            return {"ok": False, "message": _explain(exc)[0]}
+
+    @app.post("/api/box/lock")
+    def box_lock_api() -> dict[str, Any]:
+        try:
+            return {"ok": True, "message": box_lock_now()}
+        except UsbTetherError as exc:
+            return {"ok": False, "message": _explain(exc)[0]}
+
+    @app.post("/api/box/auto")
+    def box_auto(req: BoxAuto) -> dict[str, Any]:
+        box["auto"] = req.auto
+        return {"ok": True, "auto": req.auto}
+
+    @app.put("/api/box/file")
+    async def box_upload(request: Request, name: str) -> dict[str, Any]:
+        target = _box_path(name)
+        data = await request.body()
+        if len(data) > MAX_UPLOAD:
+            raise HTTPException(413, "File too large for the demo (limit 20 MB)")
+        with box_lock:
+            try:
+                # Needs the drive: the file is encrypted at once if the box is locked.
+                key = box["key"] or drive_key(agent, verifier)
+            except UsbTetherError as exc:
+                return {"ok": False, "message": _explain(exc)[0]}
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+            if box["key"] is None:
+                encrypt_file(target, key)
+        return {"ok": True, "message": f"Stored {name}" + ("" if box["key"] else " (encrypted)")}
+
+    @app.get("/api/box/file")
+    def box_download(name: str) -> Response:
+        target = _box_path(name)
+        if box["key"] is None or not target.is_file() or target.name.endswith(SUFFIX):
+            raise HTTPException(403, "The vault is locked")
+        return Response(target.read_bytes(), media_type="application/octet-stream")
+
+    @app.delete("/api/box/file")
+    def box_delete(name: str) -> dict[str, Any]:
+        target = _box_path(name)
+        if not target.is_file():
+            raise HTTPException(404, "No such file")
+        target.unlink()
+        return {"ok": True}
+
+    if monitor_interval is not None:
+
+        def _box_loop() -> None:
+            while not box_stop.is_set():
+                box_check()
+                box_stop.wait(monitor_interval)
+
+        box_stop = threading.Event()
+        box_thread = threading.Thread(target=_box_loop, name="vault-watch", daemon=True)
+        app.state.box_start = box_thread.start
+        app.state.box_stop = box_stop
 
     # -- Software Guard ------------------------------------------------------------------
 

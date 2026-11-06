@@ -29,6 +29,7 @@ input{background:#080f1c;color:var(--text);border:1px solid var(--line);border-r
 <div class="tabs">
   <button class="tab active" data-tab="auth">00 &middot; USB Authentication</button>
   <button class="tab" data-tab="guard">01 &middot; Software Guard</button>
+  <button class="tab" data-tab="box">03 &middot; File Vault</button>
   <button class="tab" data-tab="vault">02 &middot; Vault Unlock Lab</button>
 </div>
 
@@ -63,6 +64,21 @@ input{background:#080f1c;color:var(--text);border:1px solid var(--line);border-r
   </div>
   <div class="sub" style="margin:0 0 8px">EVENT TRACE</div><div class="log" id="guardLog">[SYSTEM] Ready. Enroll a drive with the CLI, then start.</div>
   <div class="note">Capability scope: resource=demo-workflow, action=execute_step:&lt;n&gt;, 8 s expiry, one use. An ordinary USB drive cannot compute anything itself, so signing happens in this local process: this demonstrates the protocol, it is not hardware security. See docs/threat-model.md.</div>
+</section>
+
+<section id="box" class="panel hidden">
+  <h2>File Vault</h2><p class="desc">Drop files or folders in. While the enrolled USB drive is plugged in they are readable; pull it out and every file is encrypted on disk (AES-256-GCM). Plug it back in to decrypt.</p>
+  <div class="row">
+    <button class="primary" onclick="boxUnlock()">&#128275; Unlock</button>
+    <button onclick="boxLock()">&#128274; Lock</button>
+    <label class="sub"><input type="checkbox" id="boxAuto" checked style="width:auto" onchange="boxSetAuto()"> Lock/unlock automatically when the drive is removed/inserted</label>
+  </div>
+  <div class="vault locked" id="boxState"><div class="lockicon" id="boxIcon">&#9635;</div><h2 id="boxTitle">LOCKED</h2><p class="sub" id="boxText">&mdash;</p></div>
+  <div id="drop" style="margin-top:16px;border:2px dashed #3b6a82;border-radius:14px;padding:26px;text-align:center;color:var(--muted)">Drag files or a folder here, or <button onclick="document.getElementById('pick').click()">choose files</button><input type="file" id="pick" multiple hidden></div>
+  <div class="sub" style="margin:14px 0 6px">FILES IN THE VAULT <span id="boxFolder"></span></div>
+  <div id="boxFiles" class="log" style="height:170px">(empty)</div>
+  <div class="sub" style="margin-top:14px">EVENT TRACE</div><div class="log" id="boxLog" style="height:120px">[SYSTEM] Enroll a drive first, then drop a file.</div>
+  <div class="note">Folders are not zipped: each file is encrypted separately in place (name.ext &rarr; name.ext.utenc), so the folder structure stays. While unlocked the files are ordinary files; anything running as you can read them. The key is derived from the drive's token, so a copy of the token opens the vault; add a passphrase for a second factor.</div>
 </section>
 
 <section id="vault" class="panel hidden">
@@ -177,4 +193,60 @@ function setVault(ok){$('vaultBox').className='vault '+(ok?'unlocked':'locked');
 async function solvePuzzle(){if(!vaultChallenge){log('vaultLog','Generate a challenge first.','warn');return;}try{const r=await api('/api/vault/solve',{challenge_id:vaultChallenge,answer:Number($('answer').value)});log('vaultLog',r.message,r.unlocked?'good':'bad');if(r.unlocked){setVault(true);vaultChallenge=null;}}catch(e){log('vaultLog',e.message,'bad');}}
 async function unlockWithUsb(){if(!vaultChallenge){log('vaultLog','Generate a fresh challenge first.','warn');return;}try{const r=await api('/api/vault/usb',{challenge_id:vaultChallenge});log('vaultLog',r.message,r.unlocked?'good':'bad');if(r.unlocked){setVault(true);vaultChallenge=null;}}catch(e){log('vaultLog',e.message,'bad');}}
 refreshUsb();setInterval(refreshUsb,6000);
+let boxPoll=null;
+function fmt(n){return n<1024?n+' B':n<1048576?(n/1024).toFixed(1)+' KB':(n/1048576).toFixed(1)+' MB';}
+async function refreshBox(){
+  try{
+    const r=await fetch('/api/box').then(x=>x.json());
+    $('boxState').className='vault '+(r.unlocked?'unlocked':'locked');
+    $('boxIcon').textContent=r.unlocked?'\u25a3 \u2713':'\u25a3';
+    $('boxTitle').textContent=r.unlocked?'UNLOCKED':'LOCKED';
+    $('boxText').textContent=r.note||(r.unlocked?'Drive present: files are readable.':'Files are encrypted on disk.');
+    $('boxFolder').textContent='\u00b7 '+r.folder;
+    if(document.activeElement!==$('boxAuto'))$('boxAuto').checked=r.auto;
+    const box=$('boxFiles');box.textContent='';
+    if(!r.files.length){box.textContent='(empty)';return;}
+    r.files.forEach(f=>{
+      const row=document.createElement('div');
+      const tag=document.createElement('span');tag.className=f.encrypted?'bad':'good';tag.textContent=f.encrypted?'\u25a0 encrypted ':'\u25a1 readable  ';
+      row.appendChild(tag);row.appendChild(document.createTextNode(f.name+'  ('+fmt(f.size)+')  '));
+      if(!f.encrypted){const a=document.createElement('a');a.href='/api/box/file?name='+encodeURIComponent(f.name);a.textContent='download';a.style.color='var(--cyan)';row.appendChild(a);}
+      const d=document.createElement('a');d.href='#';d.textContent=' delete';d.style.color='var(--red)';d.onclick=async e=>{e.preventDefault();await fetch('/api/box/file?name='+encodeURIComponent(f.name),{method:'DELETE'});refreshBox();};
+      row.appendChild(d);box.appendChild(row);
+    });
+  }catch(e){}
+}
+async function boxUnlock(){const r=await api('/api/box/unlock');log('boxLog',r.message,r.ok?'good':'bad');refreshBox();}
+async function boxLock(){const r=await api('/api/box/lock');log('boxLog',r.message,r.ok?'good':'bad');refreshBox();}
+async function boxSetAuto(){await api('/api/box/auto',{auto:$('boxAuto').checked});}
+async function boxPut(file,name){
+  const r=await fetch('/api/box/file?name='+encodeURIComponent(name),{method:'PUT',body:file});
+  const j=await r.json();
+  if(!r.ok){log('boxLog',(j.detail||'Upload failed')+' \u2014 '+name,'bad');return;}
+  log('boxLog',j.message,j.ok?'good':'bad');
+}
+function readEntry(entry,path){
+  return new Promise(resolve=>{
+    if(entry.isFile){entry.file(f=>boxPut(f,path+entry.name).then(resolve),()=>resolve());}
+    else if(entry.isDirectory){
+      const reader=entry.createReader(),all=[];
+      const next=()=>reader.readEntries(async list=>{
+        if(!list.length){for(const e of all)await readEntry(e,path+entry.name+'/');resolve();return;}
+        all.push(...list);next();
+      },()=>resolve());
+      next();
+    }else resolve();
+  });
+}
+const drop=$('drop');
+['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.style.borderColor='var(--cyan)';}));
+['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.style.borderColor='#3b6a82';}));
+drop.addEventListener('drop',async e=>{
+  const items=[...e.dataTransfer.items].map(i=>i.webkitGetAsEntry&&i.webkitGetAsEntry()).filter(Boolean);
+  for(const en of items)await readEntry(en,'');
+  refreshBox();
+});
+$('pick').addEventListener('change',async e=>{for(const f of e.target.files)await boxPut(f,f.name);e.target.value='';refreshBox();});
+refreshBox();setInterval(refreshBox,2000);
+
 </script></body></html>

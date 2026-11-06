@@ -27,6 +27,10 @@ and the workflow stops. Re-plugging does not revive it.
 **Vault Unlock Lab**: generate a challenge, then either solve the puzzle or press *USB override*,
 which runs a challenge-response whose purpose is bound to that one vault challenge.
 
+**File Vault**: drop files or a folder onto the page. While the enrolled drive is plugged in they
+are readable; unplug it and every file is encrypted on disk (each file separately, folders are
+kept as folders); plug it back in and they are decrypted. Same engine as `usbtether vault`.
+
 **Copy test**: copy `E:\.usbtether` to a second flash drive, unplug the original, and try
 again. The result is `device_mismatch`. (A drive that reports the same USB descriptor would
 pass; see [docs/threat-model.md](../../docs/threat-model.md).)
