@@ -281,7 +281,8 @@ def test_bound_folder_stays_encrypted(demo, stick, tmp_path):
     assert client.post("/api/bind/open", json={"path": str(enc)}).json()["ok"]
     assert app.state.launched[-1][-2:] == ["open", str(enc)]
 
-    app.state.monitor._probe.remove(device)
+    app.state.monitor._probe.remove(device)  # unplug: the drive's files vanish too
+    shutil.move(str(mount / TOKEN_DIR), str(tmp_path / "unplugged"))
     app.state.bind_check()
     assert client.get("/api/bind").json()["drive"] is False
 

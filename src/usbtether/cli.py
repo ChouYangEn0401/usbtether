@@ -16,11 +16,11 @@ from .device import UsbDevice
 from .enrollment import enroll
 from .errors import ProbeError, UsbTetherError
 from .opener import (
+    FolderGuard,
     association_command,
     default_command,
     open_encrypted,
     register_association,
-    sweep,
     unregister_association,
 )
 from .probe import DeviceProbe, default_probe
@@ -197,33 +197,43 @@ def _tell(message: str) -> None:
         ctypes.windll.user32.MessageBoxW(None, message, "usbtether", 0x10)
 
 
+def _passphrase_source() -> Callable[[], bytes]:
+    """Ask on the console, or with a small dialog when there is no console (double-click)."""
+    if sys.stdin is not None and sys.stdin.isatty():
+        return lambda: _prompt_passphrase(confirm=False)
+
+    def ask() -> bytes:
+        from .desktop import ask_passphrase
+
+        return ask_passphrase()
+
+    return ask
+
+
+def _cmd_app(args: argparse.Namespace, probe: Callable[[], DeviceProbe], reg: Registry) -> int:
+    from .desktop import run_app
+
+    home = Path(args.home) if args.home else default_home()
+    agent = Agent(probe(), passphrase=_passphrase_source(), secret_store=_store(args))
+    return run_app(agent, Verifier(reg), home, minimized=args.minimized)
+
+
 def _cmd_open(args: argparse.Namespace, probe: Callable[[], DeviceProbe], reg: Registry) -> int:
     home = Path(args.home) if args.home else default_home()
-    agent = Agent(
-        probe(),
-        passphrase=lambda: _prompt_passphrase(confirm=False),
-        secret_store=_store(args),
-    )
-
-    def present() -> bool:
-        try:
-            return bool(agent.candidates())
-        except UsbTetherError:
-            return False
-
+    agent = Agent(probe(), passphrase=_passphrase_source(), secret_store=_store(args))
+    guard = FolderGuard(agent, Verifier(reg), home)
     try:
-        key = drive_key(agent, Verifier(reg))
+        key = guard.ensure_key()  # verifies the drive, then sweeps crash leftovers
     except UsbTetherError as exc:
         _tell(
             f"Cannot open {Path(args.file).name}: {exc}\nPlug in the enrolled drive and try again."
         )
         return EXIT_FAILED
-    sweep(home, key)
     open_encrypted(
         Path(args.file),
         key,
         home,
-        present=present,
+        present=guard.still_present,
         idle_timeout=args.idle_timeout,
         on_event=lambda m: print(m, flush=True) if sys.stdout is not None else None,
     )
@@ -295,6 +305,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="seconds without a save before the plain copy is deleted (default 1800)",
     )
     p.set_defaults(func=_cmd_open)
+
+    p = sub.add_parser(
+        "app", help="the desktop panel: waits for the drive and keeps bound folders encrypted"
+    )
+    p.add_argument("--minimized", action="store_true", help="start minimised (used at sign-in)")
+    p.set_defaults(func=_cmd_app)
 
     p = sub.add_parser(
         "register", help="Windows: make double-clicking a .utenc file run 'usbtether open'"

@@ -104,6 +104,13 @@ A complete, tested version is in [examples/sdk_quickstart.py](examples/sdk_quick
 Errors derive from `usbtether.UsbTetherError`; authorization failures are
 `AuthorizationError` with a stable `reason` code.
 
+## Desktop app (Windows)
+
+`packaging\build.ps1` builds `usbtether-setup-<version>.exe`: a per-user installer for a small
+panel that waits for the drive, keeps chosen folders encrypted, and makes `.utenc` files open on
+double-click while the drive is plugged in (every save is encrypted back). See
+[packaging/README.md](packaging/README.md).
+
 ## Web demo
 
 An experiment harness (not a deployable service) that exercises the whole flow in a browser:

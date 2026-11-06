@@ -27,10 +27,15 @@ import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .errors import UsbTetherError
-from .vault import SUFFIX, decrypt_file, encrypt_file
+from .token import TOKEN_DIR
+from .vault import SUFFIX, decrypt_file, drive_key, encrypt_file
+
+if TYPE_CHECKING:
+    from .agent import Agent
+    from .verifier import Verifier
 
 PROG_ID = "usbtether.encfile"
 _CLASSES = r"Software\Classes"
@@ -42,14 +47,21 @@ _ALIVE_WITHIN = 5.0
 # -- Windows file association -------------------------------------------------------------
 
 
-def default_command(home: Path | None = None) -> str:
-    """The command Windows runs for a double-clicked ``.utenc`` (no console window)."""
+def program_prefix() -> str:
+    """How to start usbtether without a console window: the installed exe, or ``pythonw -m``."""
     exe = Path(sys.executable)
+    if getattr(sys, "frozen", False):  # the PyInstaller build used by the installer
+        return f'"{exe}"'
     windowless = exe.with_name("pythonw.exe")
     if windowless.exists():
         exe = windowless
+    return f'"{exe}" -m usbtether'
+
+
+def default_command(home: Path | None = None) -> str:
+    """The command Windows runs for a double-clicked ``.utenc`` (no console window)."""
     prefix = f'--home "{home}" ' if home else ""
-    return f'"{exe}" -m usbtether {prefix}open "%1"'
+    return f'{program_prefix()} {prefix}open "%1"'
 
 
 def _winreg() -> Any:
@@ -286,31 +298,47 @@ def sweep(home: Path, key: bytes | None, *, stale_after: float = 10.0) -> int:
 
 
 class BoundFolders:
-    """The folders the user asked to keep encrypted (a small JSON list in the state folder)."""
+    """The folders the user asked to keep encrypted, plus the auto-encrypt setting.
+
+    Stored as a small JSON file (``<home>/bound.json``) shared by the desktop app and the demo.
+    """
 
     def __init__(self, home: Path) -> None:
         self._file = home / "bound.json"
 
-    def folders(self) -> list[Path]:
+    def _load(self) -> dict[str, Any]:
         try:
             data = json.loads(self._file.read_text(encoding="utf-8"))
-            return [Path(p) for p in data.get("folders", [])]
-        except (OSError, ValueError, AttributeError):
-            return []
+            return data if isinstance(data, dict) else {}
+        except (OSError, ValueError):
+            return {}
 
-    def _save(self, folders: list[Path]) -> None:
+    def _store(self, **changes: Any) -> None:
+        data = {**self._load(), **changes}
         self._file.parent.mkdir(parents=True, exist_ok=True)
-        self._file.write_text(json.dumps({"folders": [str(f) for f in folders]}), encoding="utf-8")
+        self._file.write_text(json.dumps(data), encoding="utf-8")
+
+    def folders(self) -> list[Path]:
+        raw = self._load().get("folders", [])
+        return [Path(p) for p in raw] if isinstance(raw, list) else []
 
     def add(self, folder: Path) -> None:
         folder = folder.resolve()
         current = self.folders()
         if folder not in current:
-            self._save([*current, folder])
+            self._store(folders=[str(f) for f in [*current, folder]])
 
     def remove(self, folder: Path) -> None:
         folder = folder.resolve()
-        self._save([f for f in self.folders() if f.resolve() != folder])
+        self._store(folders=[str(f) for f in self.folders() if f.resolve() != folder])
+
+    @property
+    def auto(self) -> bool:
+        return bool(self._load().get("auto", True))
+
+    @auto.setter
+    def auto(self, value: bool) -> None:
+        self._store(auto=bool(value))
 
 
 def protect_folder(folder: Path, key: bytes, *, quiet_seconds: float = 2.0) -> int:
@@ -332,3 +360,113 @@ def protect_folder(folder: Path, key: bytes, *, quiet_seconds: float = 2.0) -> i
         except OSError:
             continue
     return done
+
+
+class FolderGuard:
+    """Watches for the drive and keeps the bound folders encrypted. Call :meth:`step` in a loop.
+
+    While the drive is absent every step asks the probe (slow on Windows, about 2 s). Once the
+    drive has passed a challenge-response its key is cached and presence is checked by looking
+    at the token folder on that mount, which is instant; when it disappears the key is dropped.
+    """
+
+    def __init__(
+        self,
+        agent: Agent,
+        verifier: Verifier,
+        home: Path,
+        *,
+        on_event: Callable[[str], None] = lambda _: None,
+    ) -> None:
+        self._agent = agent
+        self._verifier = verifier
+        self.home = home
+        self.bound = BoundFolders(home)
+        self._emit = on_event
+        self.key: bytes | None = None
+        self.mount: str | None = None
+        self.status = "waiting"  # waiting | unlocked | error
+        self.detail = "Waiting for the USB drive..."
+
+    def _set(self, status: str, detail: str) -> None:
+        if (status, detail) != (self.status, self.detail):
+            self.status, self.detail = status, detail
+            self._emit(detail)
+
+    def still_present(self) -> bool:
+        return self.mount is not None and (Path(self.mount) / TOKEN_DIR).is_dir()
+
+    def ensure_key(self) -> bytes:
+        """The drive key, verifying the drive first if it is not cached. Raises if absent."""
+        if self.key is None or not self.still_present():
+            candidates = self._agent.candidates()
+            if not candidates:
+                raise UsbTetherError("no USB drive with a usbtether token is plugged in")
+            mount = candidates[0].mount_point
+            self.key = drive_key(self._agent, self._verifier, mount)
+            self.mount = mount
+            sweep(self.home, self.key)
+            self._set("unlocked", f"Unlocked with the drive at {mount}")
+        return self.key
+
+    def lock(self) -> None:
+        self.key = None  # best effort: Python cannot reliably wipe memory
+        self.mount = None
+
+    def step(self) -> int:
+        """One poll. Returns how many files were auto-encrypted."""
+        if self.key is not None and not self.still_present():
+            self.lock()
+            self._set("waiting", "Drive removed. Waiting for the USB drive...")
+            return 0
+        if self.key is None:
+            try:
+                if not self._agent.candidates():
+                    self._set("waiting", "Waiting for the USB drive...")
+                    return 0
+                self.ensure_key()
+            except UsbTetherError as exc:
+                self._set("error", str(exc))
+                return 0
+        if not self.bound.auto:
+            return 0
+        return self.protect_all(quiet_seconds=2.0)
+
+    def protect_all(self, *, quiet_seconds: float = 0.0) -> int:
+        key = self.ensure_key()
+        done = sum(
+            protect_folder(f, key, quiet_seconds=quiet_seconds)
+            for f in self.bound.folders()
+            if f.is_dir()
+        )
+        if done:
+            self._emit(f"Encrypted {done} new file(s).")
+        return done
+
+
+# -- Start with Windows -------------------------------------------------------------------
+
+_RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+RUN_VALUE = "usbtether"
+
+
+def run_at_login() -> bool:
+    winreg = _winreg()
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _RUN_KEY) as key:
+            winreg.QueryValueEx(key, RUN_VALUE)
+        return True
+    except OSError:
+        return False
+
+
+def set_run_at_login(enabled: bool) -> None:
+    """Start the desktop app (minimised) when this user signs in."""
+    winreg = _winreg()
+    with winreg.CreateKey(winreg.HKEY_CURRENT_USER, _RUN_KEY) as key:
+        if enabled:
+            command = f"{program_prefix()} app --minimized"
+            winreg.SetValueEx(key, RUN_VALUE, 0, winreg.REG_SZ, command)
+        else:
+            with contextlib.suppress(OSError):
+                winreg.DeleteValue(key, RUN_VALUE)

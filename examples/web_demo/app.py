@@ -58,12 +58,11 @@ from usbtether.errors import (
 )
 from usbtether.monitor import PresenceMonitor
 from usbtether.opener import (
-    BoundFolders,
+    FolderGuard,
     association_command,
     default_command,
     protect_folder,
     register_association,
-    sweep,
     unregister_association,
 )
 from usbtether.probe import DeviceProbe, default_probe
@@ -467,8 +466,9 @@ def create_app(
 
     # -- 04 Bound folders: always encrypted on disk, open on double-click ----------------
 
-    bound = BoundFolders(home_dir)
-    bind: dict[str, Any] = {"key": None, "auto": True, "note": ""}
+    events: list[str] = []
+    guard = FolderGuard(agent, verifier, home_dir, on_event=events.append)
+    bound = guard.bound
     bind_lock = threading.RLock()
 
     def _assoc() -> str | None:
@@ -477,35 +477,13 @@ def create_app(
         except UsbTetherError:
             return None
 
-    def _bind_key() -> bytes:
-        """The drive key: cached while the drive stays plugged in."""
-        if bind["key"] is None:
-            bind["key"] = drive_key(agent, verifier)
-        return bind["key"]
+    def _note() -> str:
+        return events[-1] if events else ""
 
     def bind_check() -> None:
-        """Background tick: drop the key when the drive leaves; auto-encrypt new plain files."""
+        """Background tick: same logic as the desktop app (see ``FolderGuard``)."""
         with bind_lock:
-            try:
-                present = bool(agent.candidates())
-            except UsbTetherError:
-                return
-            if not present:
-                if bind["key"] is not None:
-                    bind["key"] = None
-                    bind["note"] = "Drive removed: the encrypted files can no longer be opened."
-                return
-            try:
-                if bind["key"] is None:
-                    _bind_key()
-                    sweep(home_dir, bind["key"])
-                    bind["note"] = "Drive detected: double-click a .utenc file to open it."
-                if bind["auto"]:
-                    n = sum(protect_folder(f, bind["key"]) for f in bound.folders() if f.is_dir())
-                    if n:
-                        bind["note"] = f"Auto-encrypted {n} new file(s)."
-            except UsbTetherError as exc:
-                bind["note"] = _explain(exc)[0]
+            guard.step()
 
     app.state.bind_check = bind_check
 
@@ -527,9 +505,9 @@ def create_app(
             folders.append({"path": str(f), "exists": f.is_dir(), "files": files})
         return {
             "folders": folders,
-            "auto": bind["auto"],
-            "note": bind["note"],
-            "drive": bind["key"] is not None,
+            "auto": bound.auto,
+            "note": _note(),
+            "drive": guard.key is not None,
             "association": _assoc(),
             "association_supported": sys.platform == "win32",
         }
@@ -541,10 +519,10 @@ def create_app(
             return {"ok": False, "message": f"Not a folder: {req.path}"}
         bound.add(folder)
         message = f"Bound {folder}."
-        if bind["auto"]:
+        if bound.auto:
             with bind_lock:
                 try:
-                    n = protect_folder(folder, _bind_key(), quiet_seconds=0)
+                    n = protect_folder(folder, guard.ensure_key(), quiet_seconds=0)
                     message += f" Encrypted {n} file(s)."
                 except UsbTetherError as exc:
                     message += " Not encrypted yet: " + _explain(exc)[0]
@@ -560,14 +538,14 @@ def create_app(
         """Manual mode: encrypt every plain file in one bound folder now."""
         with bind_lock:
             try:
-                n = protect_folder(Path(req.path), _bind_key(), quiet_seconds=0)
+                n = protect_folder(Path(req.path), guard.ensure_key(), quiet_seconds=0)
             except UsbTetherError as exc:
                 return {"ok": False, "message": _explain(exc)[0]}
         return {"ok": True, "message": f"Encrypted {n} file(s)."}
 
     @app.post("/api/bind/auto")
     def bind_auto(req: BoxAuto) -> dict[str, Any]:
-        bind["auto"] = req.auto
+        bound.auto = req.auto
         return {"ok": True, "auto": req.auto}
 
     @app.post("/api/bind/register")

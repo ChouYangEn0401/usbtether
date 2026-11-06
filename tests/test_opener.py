@@ -1,6 +1,7 @@
 import json
 import os
 import secrets
+import shutil
 import threading
 import time
 
@@ -135,3 +136,40 @@ def test_encrypt_to_another_folder_keeping_the_source(tmp_path):
     assert plain.exists() and out == tmp_path / "out" / "a.txt.utenc"
     back = decrypt_file(out, KEY, dest_dir=tmp_path / "back")
     assert back.read_bytes() == b"x" and not out.exists()
+
+
+def test_folder_guard_follows_the_drive(stick, probe, registry, tmp_path):
+    from usbtether.agent import Agent
+    from usbtether.enrollment import enroll
+    from usbtether.opener import FolderGuard
+    from usbtether.token import TOKEN_DIR
+    from usbtether.verifier import Verifier
+
+    device, mount = stick
+    events = []
+    guard = FolderGuard(Agent(probe), Verifier(registry), tmp_path / "home", on_event=events.append)
+    guard.step()
+    assert guard.status == "waiting" and guard.key is None  # plugged in but not enrolled
+
+    enroll(probe, registry, mount)
+    folder = tmp_path / "bound"
+    folder.mkdir()
+    (folder / "old.txt").write_bytes(b"x")
+    os.utime(folder / "old.txt", (1, 1))
+    guard.bound.add(folder)
+    assert guard.step() == 1 and guard.status == "unlocked" and guard.mount == str(mount)
+    assert (folder / "old.txt.utenc").exists()
+
+    guard.bound.auto = False
+    (folder / "new.txt").write_bytes(b"y")
+    os.utime(folder / "new.txt", (1, 1))
+    assert guard.step() == 0 and (folder / "new.txt").exists()
+    assert guard.protect_all() == 1  # manual "Encrypt now"
+
+    probe.remove(device)  # unplug: the token folder disappears with the drive
+    shutil.move(str(mount / TOKEN_DIR), str(tmp_path / "away"))
+    guard.step()
+    assert guard.key is None and guard.status == "waiting"
+    assert any("removed" in e for e in events)
+    with pytest.raises(UsbTetherError):
+        guard.ensure_key()

@@ -131,11 +131,19 @@ Details: [examples/web_demo/README.md](../examples/web_demo/README.md).
 
 ## 7b. Encrypted files: double-click to open
 
-Keep files encrypted on disk and open them only while the drive is plugged in:
+Keep files encrypted on disk and open them only while the drive is plugged in.
+
+**Easiest: the desktop app.** Build or get `usbtether-setup-<version>.exe` and install it (see
+[packaging/README.md](../packaging/README.md)). It registers double-click for `.utenc` and adds
+a small panel that waits for the drive and keeps *bound folders* encrypted; tick *Start with
+Windows* to have it always running. No web page needed.
+
+**From the console** (without the installer):
 
 ```
 usbtether register                      # once: double-clicking *.utenc runs "usbtether open"
-usbtether vault lock D:\Secret          # encrypt a folder (or use the web demo's tabs 03/04)
+usbtether app                           # the same panel, started from Python
+usbtether vault lock D:\Secret          # encrypt a whole folder by hand
 ```
 
 Now double-click `D:\Secret\report.docx.utenc` in Explorer. `usbtether open` checks the
@@ -152,9 +160,13 @@ opens. `usbtether register --remove` undoes the registration (it only touches
 | The helper is killed | the next `usbtether open` (or the web demo) syncs unsaved changes back and deletes the leftover |
 | You re-enroll with `--force` | **files encrypted with the old key can never be opened again** (the key comes from the token) |
 
+| Double-click does nothing / "choose an app" appears | not registered: tick *Double-click a .utenc file* in the panel, or `usbtether register`. If you once chose "Always use this app" for `.utenc`, Windows keeps that choice: pick *usbtether* in *Open with > Choose another app > Always* |
+| A program (`.exe`) in a bound folder | opens from the working copy alone, without the files next to it, so most programs fail: bound folders are for documents |
+
 Limits: while a file is open its plain copy is on disk where any program running as you can
-read it, and the key is in the helper's memory. The web demo's *Bound Folders* tab also
-encrypts new plain files that appear in a bound folder (only while the demo runs).
+read it, and the key is in the helper's memory. Bound folders are auto-encrypted only while
+the panel (or the web demo) runs. Presence while unlocked is checked by looking for the token
+folder on the verified drive letter (instant, no 2 s probe).
 
 ## 8. Day-to-day management
 
