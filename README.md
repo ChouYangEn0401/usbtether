@@ -30,7 +30,7 @@ and can re-check that on every sensitive step.
 
 ## Status
 
-Alpha (0.1.x). The protocol, token format and API may change before 1.0.
+Alpha (0.x), experimental. The protocol, token format and API may change before 1.0.
 
 | Platform | Support |
 |---|---|
@@ -42,7 +42,8 @@ Python 3.10+. The only runtime dependency is [`cryptography`](https://cryptograp
 
 ## Install
 
-Not on PyPI yet. From a checkout:
+Not on PyPI yet. Each [GitHub release](https://github.com/ChouYangEn0401/usbtether/releases)
+has a wheel: `pip install usbtether-<version>-py3-none-any.whl`. From a checkout:
 
 ```bash
 pip install .            # library + CLI
@@ -103,6 +104,48 @@ with PresenceMonitor(probe, authorizer):  # revokes the session on unplug
 A complete, tested version is in [examples/sdk_quickstart.py](examples/sdk_quickstart.py).
 Errors derive from `usbtether.UsbTetherError`; authorization failures are
 `AuthorizationError` with a stable `reason` code.
+
+## Use as a library (USB drive as an encryption key)
+
+`usbtether.core.KeyRing` registers drives as keys and encrypts or decrypts with a chosen one.
+Every call first runs the usual challenge-response with the drive, so the drive must be
+plugged in (and its password given, unless it was registered with `remember=True`).
+
+```python
+from usbtether import KeyRing, KeyNotPresentError
+
+ring = KeyRing()                       # default store; or KeyRing(home="my-app-keys")
+for drive in ring.drives():            # plugged-in USB drives
+    print(drive.mount_point, drive.product, drive.bindable, drive.key_id)
+
+key = ring.register("E:", label="desk key", remember=True)   # once per drive
+print([k.label for k in ring.keys()], [k.key_id for k in ring.present_keys()])
+
+blob = ring.encrypt(b"secret bytes", key.key_id)              # bytes -> bytes
+msg = ring.encrypt_message("hello", key.key_id)               # text -> "utmsg1:..."
+enc = ring.encrypt_file("report.pdf", key.key_id, keep=True)  # -> report.pdf.utenc
+
+try:
+    ring.decrypt(blob)                 # finds the key from the data
+    ring.decrypt_message(msg)
+    ring.decrypt_file(enc, key.key_id, dest_dir="out")
+except KeyNotPresentError:
+    print("plug the drive in")
+```
+
+* **Where things live.** Key metadata (public key, drive fingerprint, label) is in
+  `<home>/registry.json`; a `remember=True` key's unlock secret is in `<home>/secrets`
+  (Windows DPAPI). The private key stays on the drive in `.usbtether/`. `home` defaults to
+  the per-user directory the CLI uses (`%APPDATA%\usbtether`, or `USBTETHER_HOME`).
+* **Errors** (all `UsbTetherError`): `KeyNotPresentError`, `PasswordRequiredError`,
+  `WrongPasswordError`, `UnknownKeyError`, `KeyRevokedError`, `DriveVerificationError`
+  (`reason`, e.g. `device_mismatch` for a copied token), `WrongKeyError`, `TamperedError`,
+  `NotEncryptedError`, `AmbiguousDeviceError`, `UnsupportedDeviceError`.
+* **Formats.** `encrypt` output starts with `UTD1` and the key id, which is authenticated.
+  Files use the `.utenc` format of `usbtether vault` / `usbtether open` and are interchangeable
+  with them. Revoking or re-registering a drive (`overwrite=True`) makes its data undecryptable.
+* **No admin rights needed.** Windows uses PowerShell/CIM to read the drive identity; Linux
+  support is experimental.
 
 ## Desktop app (Windows)
 
