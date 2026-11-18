@@ -27,7 +27,12 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from ._util import atomic_write, utc_now_iso
-from .errors import AlreadyEnrolledError, TokenError, TokenLockedError
+from .errors import (
+    AlreadyEnrolledError,
+    PasswordRequiredError,
+    TokenError,
+    WrongPasswordError,
+)
 
 TOKEN_DIR = ".usbtether"
 TOKEN_FILE = "token.json"
@@ -145,14 +150,14 @@ def load_private_key(token: Token, passphrase: bytes | None = None) -> Ed25519Pr
     except OSError as exc:
         raise TokenError(f"cannot read private key: {exc}") from exc
     if token.key_encrypted and not passphrase:
-        raise TokenLockedError("the private key is passphrase-protected")
+        raise PasswordRequiredError("the private key is passphrase-protected")
     try:
         key = serialization.load_pem_private_key(
             pem, password=passphrase if token.key_encrypted else None
         )
     except (TypeError, ValueError) as exc:
         if token.key_encrypted:
-            raise TokenLockedError("wrong passphrase or corrupt private key") from exc
+            raise WrongPasswordError("wrong passphrase or corrupt private key") from exc
         raise TokenError(f"corrupt private key: {exc}") from exc
     if not isinstance(key, Ed25519PrivateKey):
         raise TokenError("private key is not an Ed25519 key")

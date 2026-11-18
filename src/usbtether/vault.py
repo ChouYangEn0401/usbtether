@@ -23,16 +23,32 @@ from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from .agent import Agent
-from .errors import UsbTetherError
+from .errors import (
+    DriveVerificationError,
+    NotEncryptedError,
+    TamperedError,
+    UsbTetherError,
+    VaultError,
+)
+
+__all__ = [
+    "LABEL",
+    "MAGIC",
+    "SUFFIX",
+    "VaultError",
+    "VaultResult",
+    "VaultWatcher",
+    "decrypt_file",
+    "drive_key",
+    "encrypt_file",
+    "lock_folder",
+    "unlock_folder",
+]
 from .verifier import Verifier
 
 MAGIC = b"UTV1"
 SUFFIX = ".utenc"
 LABEL = "vault-v1"
-
-
-class VaultError(UsbTetherError):
-    """A vault file could not be encrypted or decrypted."""
 
 
 @dataclass(frozen=True)
@@ -68,12 +84,14 @@ def decrypt_file(
     original = path.name[: -len(SUFFIX)]
     blob = path.read_bytes()
     if not blob.startswith(MAGIC) or len(blob) < len(MAGIC) + 12 + 16:
-        raise VaultError(f"{path.name} is not a usbtether vault file")
+        raise NotEncryptedError(f"{path.name} is not a usbtether vault file")
     nonce = blob[len(MAGIC) : len(MAGIC) + 12]
     try:
         data = AESGCM(key).decrypt(nonce, blob[len(MAGIC) + 12 :], original.encode())
     except InvalidTag as exc:
-        raise VaultError(f"cannot decrypt {path.name}: wrong key or the file was altered") from exc
+        raise TamperedError(
+            f"cannot decrypt {path.name}: wrong key or the file was altered"
+        ) from exc
     target = (dest_dir or path.parent) / original
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.with_name(target.name + ".tmp")
@@ -110,13 +128,18 @@ def unlock_folder(folder: Path, key: bytes) -> VaultResult:
     return VaultResult(changed, skipped)
 
 
-def drive_key(agent: Agent, verifier: Verifier, mount: str | None = None) -> bytes:
-    """Prove the drive is genuine (challenge-response), then derive the vault key."""
+def drive_key(
+    agent: Agent, verifier: Verifier, mount: str | None = None, *, label: str = LABEL
+) -> bytes:
+    """Prove the drive is genuine (challenge-response), then derive the key for ``label``.
+
+    The default label gives the vault / ``.utenc`` key. Raises
+    :class:`~usbtether.errors.DriveVerificationError` (a ``VaultError``) if the check fails.
+    """
     result = verifier.authenticate(agent, "vault-key", mount)
     if not result.ok:
-        reason = result.reason.value if result.reason else "failed"
-        raise VaultError(f"drive verification failed: {reason}")
-    return agent.derive_key(LABEL, mount)
+        raise DriveVerificationError(result.reason.value if result.reason else "failed")
+    return agent.derive_key(label, mount)
 
 
 class VaultWatcher:

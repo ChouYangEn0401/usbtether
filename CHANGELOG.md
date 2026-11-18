@@ -6,6 +6,27 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-18
+
+### Added
+- `usbtether.core.KeyRing` (also `from usbtether import KeyRing`): the library core for using
+  a USB drive as an encryption key. `drives()`, `register()`, `keys()`, `get()`,
+  `present_keys()`, `is_present()`, `revoke()`, `encrypt()` / `decrypt()` (bytes),
+  `encrypt_message()` / `decrypt_message()` (ASCII text), `encrypt_file()` / `decrypt_file()`
+  (`.utenc`, same format and key as `usbtether vault` / `open`). Every operation runs the usual
+  challenge-response first; no new cryptography. `KeyRing(home=...)` (or `registry=`,
+  `secret_store=`) chooses where key metadata lives; the default is unchanged.
+- Typed errors: `KeyNotPresentError`, `PasswordRequiredError`, `WrongPasswordError`,
+  `UnknownKeyError`, `KeyRevokedError`, `DriveVerificationError` (with `reason`),
+  `NotEncryptedError`, `WrongKeyError`, `TamperedError`. They subclass the earlier errors
+  (`TokenLockedError`, `DeviceNotFoundError`, `VaultError`), so existing handlers still work.
+- The wheel and sdist are attached to the GitHub release; README section "Use as a library".
+
+### Changed
+- `VaultError` moved to `usbtether.errors` (still importable from `usbtether.vault`).
+  `vault.drive_key()` takes `label=` and raises `DriveVerificationError` on a failed check.
+- The package version is read from `usbtether.__version__`; `cryptography` is limited to `<60`.
+
 ### Added
 - `usbtether vault lock|unlock|watch <folder>`: AES-256-GCM file vault keyed from the enrolled
   drive (`Agent.derive_key`). `watch` unlocks when the drive is plugged in and locks when it is
@@ -93,6 +114,7 @@ First public version.
 - Removal detection is polling-based.
 - The registry is neither signed nor encrypted.
 
-[Unreleased]: https://github.com/ChouYangEn0401/usbtether/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/ChouYangEn0401/usbtether/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/ChouYangEn0401/usbtether/compare/v0.2.0-release...v0.3.0
 [0.2.0]: https://github.com/ChouYangEn0401/usbtether/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/ChouYangEn0401/usbtether/releases/tag/v0.1.0

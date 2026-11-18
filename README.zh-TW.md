@@ -19,7 +19,7 @@ usbtether 把一般的 USB 隨身碟變成「在場證明型」憑證：程式�
 
 ## 狀態
 
-Alpha（0.1.x）。1.0 之前，協定、token 格式與 API 都可能變動。
+Alpha（0.x），實驗性質。1.0 之前，協定、token 格式與 API 都可能變動。
 
 | 平台 | 支援程度 |
 |---|---|
@@ -31,7 +31,8 @@ Alpha（0.1.x）。1.0 之前，協定、token 格式與 API 都可能變動。
 
 ## 安裝
 
-尚未發佈到 PyPI。請在原始碼目錄中安裝：
+尚未發佈到 PyPI。每個 [GitHub Release](https://github.com/ChouYangEn0401/usbtether/releases) 都附 wheel：
+`pip install usbtether-<版本>-py3-none-any.whl`。或在原始碼目錄中安裝：
 
 ```bash
 pip install .            # 函式庫 + CLI
@@ -87,6 +88,40 @@ with PresenceMonitor(probe, authorizer):  # 拔除時撤銷 session
 ```
 
 完整且有測試的範例在 [examples/sdk_quickstart.py](examples/sdk_quickstart.py)。所有錯誤都繼承自 `usbtether.UsbTetherError`；授權失敗為 `AuthorizationError`，帶有穩定的 `reason` 代碼。
+
+## 當函式庫用（把隨身碟當加密鑰匙）
+
+`usbtether.core.KeyRing` 可以把隨身碟註冊成鑰匙，再選一把來加密、解密。每次操作都會先跟隨身碟做
+challenge-response，所以隨身碟必須插著（有設密碼的要給密碼；用 `remember=True` 註冊的在這台電腦上免輸入）。
+
+```python
+from usbtether import KeyRing, KeyNotPresentError
+
+ring = KeyRing()                       # 預設位置；或 KeyRing(home="my-app-keys")
+for drive in ring.drives():            # 目前插著的隨身碟
+    print(drive.mount_point, drive.product, drive.bindable, drive.key_id)
+
+key = ring.register("E:", label="desk key", remember=True)   # 每支隨身碟註冊一次
+blob = ring.encrypt(b"secret bytes", key.key_id)              # bytes -> bytes
+msg = ring.encrypt_message("hello", key.key_id)               # 文字 -> "utmsg1:..."
+enc = ring.encrypt_file("report.pdf", key.key_id, keep=True)  # -> report.pdf.utenc
+
+try:
+    ring.decrypt(blob)                 # 從密文本身就知道要用哪把鑰匙
+    ring.decrypt_message(msg)
+    ring.decrypt_file(enc, key.key_id, dest_dir="out")
+except KeyNotPresentError:
+    print("請插上隨身碟")
+```
+
+* **資料放哪裡**：鑰匙的資料（公鑰、隨身碟指紋、名稱）在 `<home>/registry.json`；`remember=True` 的解鎖密鑰在
+  `<home>/secrets`（Windows 用 DPAPI 保護）。私鑰一直留在隨身碟的 `.usbtether/`。`home` 預設跟 CLI 同一個
+  （`%APPDATA%\usbtether`，或環境變數 `USBTETHER_HOME`）。
+* **錯誤**（都繼承 `UsbTetherError`）：`KeyNotPresentError`、`PasswordRequiredError`、`WrongPasswordError`、
+  `UnknownKeyError`、`KeyRevokedError`、`DriveVerificationError`、`WrongKeyError`、`TamperedError`、`NotEncryptedError` 等。
+* **檔案格式**：檔案用跟 `usbtether vault`／`usbtether open` 一樣的 `.utenc`，可以互通。撤銷或重新註冊隨身碟後，
+  用舊鑰匙加密的資料就解不開了。
+* **不需要系統管理員權限。**
 
 ## 桌面 App（Windows）
 

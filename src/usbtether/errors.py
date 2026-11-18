@@ -57,3 +57,49 @@ class AmbiguousDeviceError(UsbTetherError):
 
 class SecretStoreError(UsbTetherError):
     """The host secret store could not read, write or decrypt a secret."""
+
+
+class PasswordRequiredError(TokenLockedError):
+    """The private key is protected and neither a password nor a stored machine secret is
+    available (for example a ``remember`` key used on another computer)."""
+
+
+class WrongPasswordError(TokenLockedError):
+    """The supplied password (or stored secret) does not unlock the private key."""
+
+
+class KeyNotPresentError(DeviceNotFoundError):
+    """The USB drive that holds the requested key is not plugged in."""
+
+
+class UnknownKeyError(UsbTetherError):
+    """No key with this id is registered (in the registry being used)."""
+
+
+class KeyRevokedError(UsbTetherError):
+    """The key is registered but has been revoked."""
+
+
+class VaultError(UsbTetherError):
+    """Data or a file could not be encrypted or decrypted."""
+
+
+class NotEncryptedError(VaultError):
+    """The input is not usbtether ciphertext (wrong format or truncated)."""
+
+
+class WrongKeyError(VaultError):
+    """The ciphertext was made with a different key than the one requested."""
+
+
+class TamperedError(VaultError):
+    """Authentication failed: the ciphertext was altered, or it belongs to another key."""
+
+
+class DriveVerificationError(VaultError):
+    """The drive failed the challenge-response check (for example a copied token on another
+    drive: ``reason == "device_mismatch"``). ``reason`` is a :class:`FailureReason` value."""
+
+    def __init__(self, reason: str, message: str | None = None) -> None:
+        super().__init__(message or f"drive verification failed: {reason}")
+        self.reason = reason

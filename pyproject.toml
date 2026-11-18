@@ -4,14 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name = "usbtether"
-version = "0.2.0"
-description = "Bind sessions to an ordinary USB drive: device-bound keys, challenge-response, short-lived capabilities."
+dynamic = ["version"]
+description = "Use an ordinary USB drive as a key: register it, then encrypt and decrypt with it. Device-bound keys, challenge-response, short-lived capabilities."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "ChouYangEn0401" }]
-keywords = ["usb", "authentication", "challenge-response", "ed25519", "presence", "windows"]
+keywords = ["usb", "encryption", "authentication", "challenge-response", "ed25519", "presence", "windows"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -25,7 +25,7 @@ classifiers = [
     "Topic :: Security",
     "Typing :: Typed",
 ]
-dependencies = ["cryptography>=42"]
+dependencies = ["cryptography>=42,<60"]  # only stable APIs: Ed25519, AES-GCM, HKDF, PEM
 
 [project.urls]
 Homepage = "https://github.com/ChouYangEn0401/usbtether"
@@ -40,8 +40,25 @@ dev = ["pytest>=8", "pytest-cov>=5", "httpx>=0.27", "ruff>=0.6", "mypy>=1.10", "
 [project.scripts]
 usbtether = "usbtether.cli:main"
 
+[tool.hatch.version]
+path = "src/usbtether/__init__.py"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/usbtether"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/tests",
+    "/docs",
+    "/examples",
+    "/README.md",
+    "/README.zh-TW.md",
+    "/CHANGELOG.md",
+    "/LICENSE",
+    "/SECURITY.md",
+    "/pyproject.toml",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
