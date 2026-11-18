@@ -23,16 +23,12 @@ from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from .agent import Agent
-from .errors import UsbTetherError
+from .errors import NotEncryptedError, TamperedError, UsbTetherError, VaultError
 from .verifier import Verifier
 
 MAGIC = b"UTV1"
 SUFFIX = ".utenc"
 LABEL = "vault-v1"
-
-
-class VaultError(UsbTetherError):
-    """A vault file could not be encrypted or decrypted."""
 
 
 @dataclass(frozen=True)
@@ -68,12 +64,14 @@ def decrypt_file(
     original = path.name[: -len(SUFFIX)]
     blob = path.read_bytes()
     if not blob.startswith(MAGIC) or len(blob) < len(MAGIC) + 12 + 16:
-        raise VaultError(f"{path.name} is not a usbtether vault file")
+        raise NotEncryptedError(f"{path.name} is not a usbtether vault file")
     nonce = blob[len(MAGIC) : len(MAGIC) + 12]
     try:
         data = AESGCM(key).decrypt(nonce, blob[len(MAGIC) + 12 :], original.encode())
     except InvalidTag as exc:
-        raise VaultError(f"cannot decrypt {path.name}: wrong key or the file was altered") from exc
+        raise TamperedError(
+            f"cannot decrypt {path.name}: wrong key or the file was altered"
+        ) from exc
     target = (dest_dir or path.parent) / original
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.with_name(target.name + ".tmp")
