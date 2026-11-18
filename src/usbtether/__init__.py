@@ -1,6 +1,15 @@
 """usbtether: bind sessions to an ordinary USB drive.
 
-Typical use::
+Register a drive as a key and encrypt with it (see :mod:`usbtether.core`)::
+
+    from usbtether import KeyRing
+
+    ring = KeyRing()
+    key = ring.register("E:", label="desk key", remember=True)
+    blob = ring.encrypt(b"hello", key.key_id)
+    assert ring.decrypt(blob) == b"hello"  # needs the drive plugged in
+
+Sessions and capabilities::
 
     from usbtether import Agent, Authorizer, Registry, Verifier, default_probe
 
@@ -16,10 +25,11 @@ Typical use::
 See the README and ``docs/`` for the protocol and the (limited) security guarantees.
 """
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 from .agent import Agent, TokenCandidate
 from .authz import Authorizer, Capability, Session, capability_purpose
+from .core import Drive, KeyRecord, KeyRing
 from .device import DeviceReport, SerialQuality, UsbDevice, Volume
 from .enrollment import EnrollmentResult, enroll
 from .errors import (
@@ -27,15 +37,25 @@ from .errors import (
     AmbiguousDeviceError,
     AuthorizationError,
     DeviceNotFoundError,
+    DriveVerificationError,
+    KeyNotPresentError,
+    KeyRevokedError,
+    NotEncryptedError,
+    PasswordRequiredError,
     ProbeError,
     ProtocolError,
     RegistryError,
     SecretStoreError,
+    TamperedError,
     TokenError,
     TokenLockedError,
+    UnknownKeyError,
     UnsupportedDeviceError,
     UnsupportedPlatformError,
     UsbTetherError,
+    VaultError,
+    WrongKeyError,
+    WrongPasswordError,
 )
 from .monitor import PresenceMonitor
 from .probe import DeviceProbe, InMemoryProbe, default_probe
@@ -63,12 +83,20 @@ __all__ = [
     "DeviceProbe",
     "DeviceReport",
     "DpapiSecretStore",
+    "Drive",
+    "DriveVerificationError",
     "EnrollmentResult",
     "FailureReason",
     "FileSecretStore",
     "HostSecretStore",
     "InMemoryProbe",
+    "KeyNotPresentError",
+    "KeyRecord",
+    "KeyRevokedError",
+    "KeyRing",
+    "NotEncryptedError",
     "NullSecretStore",
+    "PasswordRequiredError",
     "PresenceMonitor",
     "ProbeError",
     "ProtocolError",
@@ -79,15 +107,20 @@ __all__ = [
     "SecretStoreError",
     "SerialQuality",
     "Session",
+    "TamperedError",
     "TokenCandidate",
     "TokenError",
     "TokenLockedError",
+    "UnknownKeyError",
     "UnsupportedDeviceError",
     "UnsupportedPlatformError",
     "UsbDevice",
     "UsbTetherError",
+    "VaultError",
     "Verifier",
     "Volume",
+    "WrongKeyError",
+    "WrongPasswordError",
     "__version__",
     "capability_purpose",
     "default_probe",

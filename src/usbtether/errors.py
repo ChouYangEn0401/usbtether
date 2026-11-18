@@ -94,3 +94,12 @@ class WrongKeyError(VaultError):
 
 class TamperedError(VaultError):
     """Authentication failed: the ciphertext was altered, or it belongs to another key."""
+
+
+class DriveVerificationError(VaultError):
+    """The drive failed the challenge-response check (for example a copied token on another
+    drive: ``reason == "device_mismatch"``). ``reason`` is a :class:`FailureReason` value."""
+
+    def __init__(self, reason: str, message: str | None = None) -> None:
+        super().__init__(message or f"drive verification failed: {reason}")
+        self.reason = reason

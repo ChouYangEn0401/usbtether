@@ -23,7 +23,27 @@ from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from .agent import Agent
-from .errors import NotEncryptedError, TamperedError, UsbTetherError, VaultError
+from .errors import (
+    DriveVerificationError,
+    NotEncryptedError,
+    TamperedError,
+    UsbTetherError,
+    VaultError,
+)
+
+__all__ = [
+    "LABEL",
+    "MAGIC",
+    "SUFFIX",
+    "VaultError",
+    "VaultResult",
+    "VaultWatcher",
+    "decrypt_file",
+    "drive_key",
+    "encrypt_file",
+    "lock_folder",
+    "unlock_folder",
+]
 from .verifier import Verifier
 
 MAGIC = b"UTV1"
@@ -108,13 +128,18 @@ def unlock_folder(folder: Path, key: bytes) -> VaultResult:
     return VaultResult(changed, skipped)
 
 
-def drive_key(agent: Agent, verifier: Verifier, mount: str | None = None) -> bytes:
-    """Prove the drive is genuine (challenge-response), then derive the vault key."""
+def drive_key(
+    agent: Agent, verifier: Verifier, mount: str | None = None, *, label: str = LABEL
+) -> bytes:
+    """Prove the drive is genuine (challenge-response), then derive the key for ``label``.
+
+    The default label gives the vault / ``.utenc`` key. Raises
+    :class:`~usbtether.errors.DriveVerificationError` (a ``VaultError``) if the check fails.
+    """
     result = verifier.authenticate(agent, "vault-key", mount)
     if not result.ok:
-        reason = result.reason.value if result.reason else "failed"
-        raise VaultError(f"drive verification failed: {reason}")
-    return agent.derive_key(LABEL, mount)
+        raise DriveVerificationError(result.reason.value if result.reason else "failed")
+    return agent.derive_key(label, mount)
 
 
 class VaultWatcher:
